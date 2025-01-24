@@ -1,0 +1,7 @@
+<library path="lib/libfliqc_controller_ros">
+  <class name="fliqc_controller_ros/JointVelocityExampleController" type="fliqc_controller_ros::JointVelocityExampleController" base_class_type="controller_interface::ControllerBase">
+      <description>
+          The same JointVelocityExampleController to check if the basic configuration works correctly.
+      </description>
+  </class>
+</library>
