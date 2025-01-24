@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.0.2)
-project(FLIQC_controller_ros)
+project(fliqc_controller_ros)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
 set(CMAKE_CXX_STANDARD 11)
@@ -29,8 +29,12 @@ find_package(catkin REQUIRED COMPONENTS
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
   INCLUDE_DIRS include
-  LIBRARIES FLIQC_controller_ros
-#  CATKIN_DEPENDS roscpp
+  LIBRARIES fliqc_controller_ros
+  CATKIN_DEPENDS 
+    roscpp
+    controller_interface
+    hardware_interface
+    pluginlib
 #  DEPENDS system_lib
 )
 
