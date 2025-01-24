@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <package format="2">
-  <name>FLIQC_controller_ros</name>
+  <name>fliqc_controller_ros</name>
   <version>0.0.0</version>
-  <description>The FLIQC_controller_ros package</description>
+  <description>The fliqc_controller_ros package</description>
 
   <!-- One maintainer tag required, multiple allowed, one person per tag -->
   <!-- Example:  -->
@@ -19,7 +19,7 @@
   <!-- Url tags are optional, but multiple are allowed, one per tag -->
   <!-- Optional attribute type can be: website, bugtracker, or repository -->
   <!-- Example: -->
-  <!-- <url type="website">http://wiki.ros.org/FLIQC_controller_ros</url> -->
+  <!-- <url type="website">http://wiki.ros.org/fliqc_controller_ros</url> -->
 
 
   <!-- Author tags are optional, multiple are allowed, one per tag -->
@@ -62,6 +62,6 @@
   <!-- The export tag contains other, unspecified, tags -->
   <export>
     <!-- Other tools can request additional information be placed here -->
-
+    <controller_interface plugin="${prefix}/fliqc_controller_ros_plugin.xml" />
   </export>
 </package>
