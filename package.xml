@@ -56,12 +56,13 @@
   <depend>controller_interface</depend>
   <depend>hardware_interface</depend>
   <depend>pluginlib</depend>
-
-  <depend>franka_control</depend>
+  <depend>visualization_msgs</depend>
+  <depend>geometry_msgs</depend>
 
   <!-- The export tag contains other, unspecified, tags -->
   <export>
     <!-- Other tools can request additional information be placed here -->
     <controller_interface plugin="${prefix}/fliqc_controller_ros_plugin.xml" />
+    <controller_interface plugin="${prefix}/fliqc_controller_ros_plugin_debug.xml" />
   </export>
 </package>

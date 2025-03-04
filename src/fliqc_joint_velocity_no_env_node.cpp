@@ -1,0 +1,514 @@
+// Copyright (c) 2023 Franka Robotics GmbH
+// Use of this source code is governed by the Apache-2.0 license, see LICENSE
+#include <pinocchio/parsers/urdf.hpp>
+#include <pinocchio/parsers/srdf.hpp>
+#include <pinocchio/algorithm/model.hpp>
+
+#include <fliqc_controller_ros/fliqc_joint_velocity_no_env_node.hpp>
+#include <fliqc_controller_ros/helpers.hpp>
+#include "robot_env_evaluator/robot_env_evaluator_path.h"
+
+#include <cmath>
+#include <array>
+
+#include <controller_interface/controller_base.h>
+#include <hardware_interface/hardware_interface.h>
+#include <hardware_interface/joint_command_interface.h>
+#include <pluginlib/class_list_macros.h>
+#include <ros/ros.h>
+
+#ifdef CONTROLLER_DEBUG
+#include <visualization_msgs/MarkerArray.h>
+#include <visualization_msgs/Marker.h>
+#include <geometry_msgs/Point.h>
+#endif // CONTROLLER_DEBUG
+
+namespace fliqc_controller_ros {
+
+bool FLIQCJointVelocityNoEnvNode::init(hardware_interface::RobotHW* robot_hardware,
+                                          ros::NodeHandle& node_handle) {
+  // Get robot arm id and joint names parameters
+  std::string arm_id;
+  READ_PARAM(node_handle, "FLIQCJointVelocityNoEnvNode", "arm_id", arm_id);
+
+  std::vector<std::string> joint_names;
+  READ_PARAM_SILENT(node_handle, "FLIQCJointVelocityNoEnvNode", "joint_names", joint_names);
+  
+  // Get the control interface of the robot joints
+  dim_q_ = joint_names.size();
+
+  velocity_joint_interface_ = robot_hardware->get<hardware_interface::VelocityJointInterface>();
+  if (velocity_joint_interface_ == nullptr) {
+    ROS_ERROR("FLIQCJointVelocityNoEnvNode: Error getting velocity joint interface from hardware!");
+    return false;
+  }
+
+  velocity_joint_handles_.resize(dim_q_);
+  for (size_t i = 0; i < dim_q_; ++i) {
+    try {
+      velocity_joint_handles_[i] = velocity_joint_interface_->getHandle(joint_names[i]);
+    } catch (const hardware_interface::HardwareInterfaceException& ex) {
+      ROS_ERROR_STREAM("FLIQCJointVelocityNoEnvNode: Exception getting joint handles: " << ex.what());
+      return false;
+    }
+  }
+
+  // Initialize the controller
+  controller_ptr_ = std::make_unique<FLIQC_controller_core::FLIQC_controller_joint_velocity_basic>(dim_q_);
+  
+  // controller parameters: lcqpow parameters
+  READ_PARAM(node_handle, "FLIQCJointVelocityNoEnvNode", 
+      "/lcqpow/complementarityTolerance", controller_ptr_->lcqp_solver.complementarityTolerance);
+  READ_PARAM(node_handle, "FLIQCJointVelocityNoEnvNode",
+      "/lcqpow/stationarityTolerance", controller_ptr_->lcqp_solver.stationarityTolerance);
+  READ_PARAM(node_handle, "FLIQCJointVelocityNoEnvNode",
+      "/lcqpow/initialPenaltyParameter", controller_ptr_->lcqp_solver.initialPenaltyParameter);
+  READ_PARAM(node_handle, "FLIQCJointVelocityNoEnvNode",
+      "/lcqpow/penaltyUpdateFactor", controller_ptr_->lcqp_solver.penaltyUpdateFactor);
+
+  controller_ptr_->lcqp_solver.updateOptions();
+
+  // controller parameters: fliqc_controller_core parameters
+  READ_PARAM(node_handle, "FLIQCJointVelocityNoEnvNode", 
+      "/fliqc_controller_core/buffer_history", controller_ptr_->buffer_history);
+  READ_PARAM(node_handle, "FLIQCJointVelocityNoEnvNode",
+      "/fliqc_controller_core/enable_lambda_constraint_in_L", controller_ptr_->enable_lambda_constraint_in_L);
+  READ_PARAM(node_handle, "FLIQCJointVelocityNoEnvNode",
+      "/fliqc_controller_core/enable_lambda_constraint_in_x", controller_ptr_->enable_lambda_constraint_in_x);
+  READ_PARAM(node_handle, "FLIQCJointVelocityNoEnvNode",
+      "/fliqc_controller_core/lambda_max", controller_ptr_->lambda_max);
+  READ_PARAM(node_handle, "FLIQCJointVelocityNoEnvNode",
+      "/fliqc_controller_core/enable_esc_vel_constraint", controller_ptr_->enable_esc_vel_constraint);
+  READ_PARAM(node_handle, "FLIQCJointVelocityNoEnvNode",
+      "/fliqc_controller_core/esc_vel_max", controller_ptr_->esc_vel_max);
+  READ_PARAM(node_handle, "FLIQCJointVelocityNoEnvNode",
+      "/fliqc_controller_core/dt", controller_ptr_->dt);
+  READ_PARAM(node_handle, "FLIQCJointVelocityNoEnvNode",
+      "/fliqc_controller_core/eps", controller_ptr_->eps);
+  READ_PARAM(node_handle, "FLIQCJointVelocityNoEnvNode",
+      "/fliqc_controller_core/active_threshold", controller_ptr_->active_threshold);
+  
+  std::vector<double> q_dot_max;
+  READ_PARAM_SILENT(node_handle, "FLIQCJointVelocityNoEnvNode", "/fliqc_controller_core/q_dot_max", q_dot_max);
+  controller_ptr_->q_dot_max = Eigen::Map<Eigen::VectorXd>(q_dot_max.data(), q_dot_max.size());
+  ROS_INFO_STREAM("FLIQCJointVelocityNoEnvNode: Getting parameter q_dot_max: " << controller_ptr_->q_dot_max.transpose());
+
+  const std::string robot_path = "/opt/openrobots/share/example-robot-data";
+  const std::string urdf_filename = robot_path + "/robots/panda_description/urdf/panda.urdf";
+  const std::string stl_filename = robot_path + "/robots/panda_description/meshes/";
+  std::string srdf_filename = ROBOT_ENV_EVALUATOR_PATH;
+  srdf_filename += "/scripts/panda-alternative.srdf";
+    
+  pinocchio::Model model_original;
+  pinocchio::Model model;
+  pinocchio::urdf::buildModel(urdf_filename, model_original, false);
+  std::vector<pinocchio::JointIndex> joints_to_lock = {8, 9};
+  Eigen::VectorXd lock_positions(9);
+  lock_positions << 0, 0, 0, 0, 0, 0, 0, 0.03, 0.03;
+  pinocchio::buildReducedModel(model_original, joints_to_lock, lock_positions, model);
+  
+  pinocchio::GeometryModel collision_model;
+  pinocchio::urdf::buildGeom(model, urdf_filename, pinocchio::COLLISION, collision_model, "/opt/openrobots/share");
+  collision_model.addAllCollisionPairs();
+  pinocchio::srdf::removeCollisionPairs(model, collision_model, srdf_filename);
+  collision_model.geometryObjects[0].disableCollision = true;
+  collision_model.geometryObjects[1].disableCollision = true;
+  collision_model.geometryObjects[2].disableCollision = true;
+  collision_model.geometryObjects[9].disableCollision = true;
+  collision_model.geometryObjects[10].disableCollision = true;
+  collision_model.geometryObjects[11].disableCollision = true;
+  collision_model.geometryObjects[12].disableCollision = true;
+  collision_model.geometryObjects[13].disableCollision = true;
+  collision_model.geometryObjects[14].disableCollision = true;
+  collision_model.geometryObjects[15].disableCollision = true;
+  collision_model.geometryObjects[16].disableCollision = true;
+
+  env_evaluator_ptr_ = std::make_unique<robot_env_evaluator::RobotEnvEvaluator>(model, collision_model);
+
+  // simulate virtual dynamic obstacle information
+  obsList_.push_back(Eigen::Vector3d(0.35, 0.5, 0.4)); 
+  obsRadiusList_.push_back(0.05);
+  obsList_.push_back(Eigen::Vector3d(-0.13, -0.52, 0.5)); 
+  obsRadiusList_.push_back(0.1);
+  obsList_.push_back(Eigen::Vector3d(0.25, 0.3, 0.4)); 
+  obsRadiusList_.push_back(0.05);
+  obsList_.push_back(Eigen::Vector3d(0.30, 0.3, 0.4));
+  obsRadiusList_.push_back(0.05); 
+
+  return true;
+}
+
+void FLIQCJointVelocityNoEnvNode::starting(const ros::Time& /* time */) {
+  elapsed_time_ = ros::Duration(0.0);
+}
+
+void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
+                                            const ros::Duration& period) {
+  elapsed_time_ += period;
+
+  // simulate virutal dynamic obstacle information
+  static int phase = 1;
+  if (phase == 1){
+    obsList_[1] = obsList_[1] + Eigen::Vector3d(0, 0.10 * 0.001, 0);
+    if (obsList_[1](1) > - 0.1){
+        phase = 2;
+    }
+  }
+  else{
+    obsList_[1] = obsList_[1] + Eigen::Vector3d(0, -0.05 * 0.001, 0);
+    obsList_[2] = obsList_[2] + Eigen::Vector3d(0, -0.05 * 0.001, 0);
+    obsList_[0] = obsList_[0] + Eigen::Vector3d(0, -0.05 * 0.001, 0);
+    obsList_[3] = obsList_[3] + Eigen::Vector3d(0, -0.05 * 0.001, 0);
+  }
+
+  // collect the obstacle information. In this file, we make up our own obstacle information
+  Eigen::VectorXd q = Eigen::VectorXd::Zero(dim_q_);
+  std::vector<robot_env_evaluator::obstacleInput> obstacles;
+  std::vector<robot_env_evaluator::distanceResult> distances;
+  for (size_t i = 0; i < dim_q_; ++i) {
+    q(i) = velocity_joint_handles_[i].getPosition();
+  }
+  for (size_t i = 0; i < obsList_.size(); ++i){
+    coal::Sphere sphere(obsRadiusList_[i]);
+    Eigen::Matrix4d pose = Eigen::Matrix4d::Identity();
+    pose << 1, 0, 0, obsList_[i](0),
+            0, 1, 0, obsList_[i](1),
+            0, 0, 1, obsList_[i](2),
+            0, 0, 0, 1;
+    obstacles.push_back({sphere, pose});
+  }
+  env_evaluator_ptr_ -> computeDistances(q, obstacles, distances);
+  env_evaluator_ptr_ -> InspectGeomModelAndData();
+
+  // publish the obstacles
+  #ifdef CONTROLLER_DEBUG
+  // make a publisher for the obstacle, do it in 30Hz
+  do{
+    static ros::NodeHandle node_handle;
+    static ros::Time last_publish_time = ros::Time::now();
+    if (ros::Time::now() - last_publish_time > ros::Duration(1.0/30)){
+      last_publish_time = ros::Time::now();
+      static ros::Publisher obs_pub;
+      if (!obs_pub){
+        obs_pub = node_handle.advertise<visualization_msgs::MarkerArray>("obstacles", 1);
+      }
+      // publish the obstacle
+      visualization_msgs::MarkerArray obs_marker_array;
+      for (size_t i = 0; i < obsList_.size(); ++i){
+        visualization_msgs::Marker obs_marker;
+        obs_marker.header.frame_id = "panda_link0";
+        obs_marker.header.stamp = ros::Time::now();
+        obs_marker.ns = "obstacle";
+        obs_marker.id = i;
+        obs_marker.type = visualization_msgs::Marker::SPHERE;
+        obs_marker.action = visualization_msgs::Marker::ADD;
+        obs_marker.pose.position.x = obsList_[i](0);
+        obs_marker.pose.position.y = obsList_[i](1);
+        obs_marker.pose.position.z = obsList_[i](2);
+        obs_marker.pose.orientation.x = 0.0;
+        obs_marker.pose.orientation.y = 0.0;
+        obs_marker.pose.orientation.z = 0.0;
+        obs_marker.pose.orientation.w = 1.0;
+        obs_marker.scale.x = 2 * obsRadiusList_[i];
+        obs_marker.scale.y = 2 * obsRadiusList_[i];
+        obs_marker.scale.z = 2 * obsRadiusList_[i];
+        obs_marker.color.a = 1.0;
+        obs_marker.color.r = 0.0;
+        obs_marker.color.g = 0.0;
+        obs_marker.color.b = 1.0;
+        obs_marker_array.markers.push_back(obs_marker);
+      }
+      obs_pub.publish(obs_marker_array);
+    }
+  } while(false);
+  #endif // CONTROLLER_DEBUG
+
+  // collect the distance array information
+  Eigen::VectorXd q_dot_guide(dim_q_);
+  FLIQC_controller_core::FLIQC_cost_input cost_input;
+  std::vector<FLIQC_controller_core::FLIQC_distance_input> distance_inputs;
+  
+  Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
+  Eigen::MatrixXd Jpos = Eigen::MatrixXd::Zero(6, dim_q_);
+  env_evaluator_ptr_ -> forwardKinematics(q, 7, T); // 0 base link, 1-7 are the different seven joints
+  env_evaluator_ptr_ -> jacobian(q, 7, Jpos);
+
+  Eigen::Vector3d goal_(0.1, 0.450, 0.55);
+  Eigen::Vector3d now_ = T.block<3, 1>(0, 3);
+  Eigen::Vector3d goal_diff = goal_ - now_;
+  Eigen::Vector3d goal_diff_regularized = goal_diff;
+  double vel = 0.05;
+  if (goal_diff_regularized.norm() > (vel/0.5)){
+    goal_diff_regularized = goal_diff_regularized.normalized() * 0.05;
+  } else {
+    goal_diff_regularized = goal_diff * 0.5;
+  }
+  Jpos = Jpos.block<3, 7>(0, 0);
+  q_dot_guide = Jpos.jacobiSvd(Eigen::ComputeThinU | Eigen::ComputeThinV).solve(goal_diff_regularized);
+  
+  // publish the controller start and goal information
+  #ifdef CONTROLLER_DEBUG
+  do{
+    static ros::NodeHandle node_handle;
+    static ros::Time last_publish_time = ros::Time::now();
+    if (ros::Time::now() - last_publish_time > ros::Duration(1.0/30)){
+      last_publish_time = ros::Time::now();
+      static ros::Publisher obs_pub;
+      if (!obs_pub){
+        obs_pub = node_handle.advertise<visualization_msgs::MarkerArray>("obstacles", 1);
+      }
+      visualization_msgs::MarkerArray obs_marker_array;
+      geometry_msgs::Point point_helper;
+        // The goal position
+        visualization_msgs::Marker goal_marker;
+        goal_marker.header.frame_id = "panda_link0";
+        goal_marker.header.stamp = ros::Time::now();
+        goal_marker.ns = "controller_info";
+        goal_marker.id = 0;
+        goal_marker.type = visualization_msgs::Marker::SPHERE;
+        goal_marker.action = visualization_msgs::Marker::ADD;
+        goal_marker.pose.position.x = goal_(0);
+        goal_marker.pose.position.y = goal_(1);
+        goal_marker.pose.position.z = goal_(2);
+        goal_marker.pose.orientation.w = 1.0;
+        goal_marker.scale.x = 0.01;
+        goal_marker.scale.y = 0.01;
+        goal_marker.scale.z = 0.01;
+        goal_marker.color.a = 1.0;
+        goal_marker.color.r = 1.0;
+        goal_marker.color.g = 0.0;
+        goal_marker.color.b = 0.0;
+        obs_marker_array.markers.push_back(goal_marker);
+
+        // The current EE position
+        visualization_msgs::Marker diff_arrow;
+        diff_arrow.header.frame_id = "panda_link0";
+        diff_arrow.header.stamp = ros::Time::now(); 
+        diff_arrow.ns = "controller_info";
+        diff_arrow.id = 1;
+        diff_arrow.type = visualization_msgs::Marker::ARROW;
+        diff_arrow.action = visualization_msgs::Marker::ADD;
+        point_helper.x = now_(0);
+        point_helper.y = now_(1);
+        point_helper.z = now_(2);
+        diff_arrow.points.push_back(point_helper);
+        Eigen::Vector3d goal_diff_regularized_after = now_ + goal_diff_regularized;
+        point_helper.x = goal_diff_regularized_after(0);
+        point_helper.y = goal_diff_regularized_after(1);
+        point_helper.z = goal_diff_regularized_after(2);
+        diff_arrow.points.push_back(point_helper);
+        diff_arrow.pose.orientation.w = 1.0;
+        diff_arrow.scale.x = 0.005;
+        diff_arrow.scale.y = 0.01;
+        diff_arrow.scale.z = 0.01;
+        diff_arrow.color.a = 0.6;
+        diff_arrow.color.r = 0.0;
+        diff_arrow.color.g = 1.0;
+        diff_arrow.color.b = 0.0;
+        obs_marker_array.markers.push_back(diff_arrow);
+
+        // The end of velocity goal 
+        visualization_msgs::Marker q_dot_guide_marker;
+        q_dot_guide_marker.header.frame_id = "panda_link0";
+        q_dot_guide_marker.header.stamp = ros::Time::now();
+        q_dot_guide_marker.ns = "controller_info";
+        q_dot_guide_marker.id = 2;
+        q_dot_guide_marker.type = visualization_msgs::Marker::ARROW;
+        q_dot_guide_marker.action = visualization_msgs::Marker::ADD;
+        point_helper.x = now_(0);
+        point_helper.y = now_(1);
+        point_helper.z = now_(2);
+        q_dot_guide_marker.points.push_back(point_helper);
+        Eigen::Vector3d q_dot_guide_vel = now_ + Jpos * q_dot_guide;
+        point_helper.x = q_dot_guide_vel(0);
+        point_helper.y = q_dot_guide_vel(1);
+        point_helper.z = q_dot_guide_vel(2);
+        q_dot_guide_marker.points.push_back(point_helper);
+        q_dot_guide_marker.pose.orientation.w = 1.0;
+        q_dot_guide_marker.scale.x = 0.005;
+        q_dot_guide_marker.scale.y = 0.01;
+        q_dot_guide_marker.scale.z = 0.01;
+        q_dot_guide_marker.color.a = 0.6;
+        q_dot_guide_marker.color.r = 0.0;
+        q_dot_guide_marker.color.g = 0.0;
+        q_dot_guide_marker.color.b = 1.0;
+        obs_marker_array.markers.push_back(q_dot_guide_marker);
+      obs_pub.publish(obs_marker_array);
+    }
+  } while(false);
+  #endif // CONTROLLER_DEBUG
+
+  cost_input.Q = Eigen::MatrixXd::Identity(dim_q_, dim_q_);
+  cost_input.g = Eigen::VectorXd::Zero(dim_q_);
+
+  // //distances
+  // for (size_t i = 0; i < distances.size(); i++){
+  //   ROS_INFO_STREAM("[STEP1]FLIQCJointVelocityNoEnvNode: Distance " << i << " is "
+  //       << distances[i].distance << " with projector " << std::endl 
+  //       << distances[i].projector_jointspace_to_dist.transpose());
+  // }
+  
+  // publish the controller information
+  #ifdef CONTROLLER_DEBUG
+    do{
+      static ros::NodeHandle node_handle;
+      static ros::Time last_publish_time = ros::Time::now();
+      if (ros::Time::now() - last_publish_time > ros::Duration(1.0/30)){
+        last_publish_time = ros::Time::now();
+        static ros::Publisher obs_pub;
+        if (!obs_pub){
+          obs_pub = node_handle.advertise<visualization_msgs::MarkerArray>("obstacles", 1);
+        }
+        visualization_msgs::MarkerArray obs_marker_array;
+        geometry_msgs::Point point_helper;
+        for (size_t i = 0; i < distances.size(); ++i){
+          // nearest point on object
+          visualization_msgs::Marker nearest_point_marker;
+          nearest_point_marker.header.frame_id = "panda_link0";
+          nearest_point_marker.header.stamp = ros::Time::now();
+          nearest_point_marker.ns = "env_info_obs";
+          nearest_point_marker.id = i;
+          nearest_point_marker.type = visualization_msgs::Marker::SPHERE;
+          nearest_point_marker.action = visualization_msgs::Marker::ADD;
+          nearest_point_marker.pose.position.x = distances[i].nearest_point_on_object(0);
+          nearest_point_marker.pose.position.y = distances[i].nearest_point_on_object(1);
+          nearest_point_marker.pose.position.z = distances[i].nearest_point_on_object(2);
+          nearest_point_marker.pose.orientation.w = 1.0;
+          nearest_point_marker.scale.x = 0.0075;
+          nearest_point_marker.scale.y = 0.0075;
+          nearest_point_marker.scale.z = 0.0075;
+          nearest_point_marker.color.a = 1.0; 
+          nearest_point_marker.color.r = 0.0;
+          nearest_point_marker.color.g = 1.0;
+          nearest_point_marker.color.b = 0.0;
+          obs_marker_array.markers.push_back(nearest_point_marker);
+
+          // nearest point on robot
+          nearest_point_marker.ns = "env_info_rbt";
+          nearest_point_marker.pose.position.x = distances[i].nearest_point_on_robot(0);
+          nearest_point_marker.pose.position.y = distances[i].nearest_point_on_robot(1);
+          nearest_point_marker.pose.position.z = distances[i].nearest_point_on_robot(2);
+          obs_marker_array.markers.push_back(nearest_point_marker);
+
+          // line connecting two points
+          visualization_msgs::Marker connection_line;
+          connection_line.header.frame_id = "panda_link0";
+          connection_line.header.stamp = ros::Time::now();
+          connection_line.ns = "env_info_connection";
+          connection_line.id = i;
+          connection_line.type = visualization_msgs::Marker::LINE_LIST;
+          connection_line.action = visualization_msgs::Marker::ADD;
+          point_helper.x = distances[i].nearest_point_on_robot(0);
+          point_helper.y = distances[i].nearest_point_on_robot(1);
+          point_helper.z = distances[i].nearest_point_on_robot(2);
+          connection_line.points.push_back(point_helper);
+          point_helper.x = distances[i].nearest_point_on_object(0);
+          point_helper.y = distances[i].nearest_point_on_object(1);
+          point_helper.z = distances[i].nearest_point_on_object(2);
+          connection_line.points.push_back(point_helper);
+          connection_line.pose.orientation.w = 1.0;
+          connection_line.scale.x = 0.0025;
+          connection_line.color.a = 0.6;
+          if (distances[i].distance > controller_ptr_->active_threshold){
+            connection_line.color.r = 0.0;
+            connection_line.color.g = 0.1;
+            connection_line.color.b = 0.0;
+          } else if (distances[i].distance > controller_ptr_->eps) {
+            connection_line.color.r = 1.0;
+            connection_line.color.g = 1.0;
+            connection_line.color.b = 0.0;
+          } else {
+            connection_line.color.r = 1.0;
+            connection_line.color.g = 0.0;
+            connection_line.color.b = 0.0;
+          }
+          obs_marker_array.markers.push_back(connection_line);
+
+          // normal vector to avoid the obstacle
+          visualization_msgs::Marker normal_vector_marker;
+          normal_vector_marker.header.frame_id = "panda_link0";
+          normal_vector_marker.header.stamp = ros::Time::now();
+          normal_vector_marker.ns = "env_info_normal";
+          normal_vector_marker.id = i;
+          normal_vector_marker.type = visualization_msgs::Marker::ARROW;
+          normal_vector_marker.action = visualization_msgs::Marker::ADD;
+          point_helper.x = distances[i].nearest_point_on_robot(0);
+          point_helper.y = distances[i].nearest_point_on_robot(1);
+          point_helper.z = distances[i].nearest_point_on_robot(2);
+          normal_vector_marker.points.push_back(point_helper);
+          Eigen::Vector3d normal_vector_end = distances[i].nearest_point_on_robot + distances[i].normal_vector * 0.1;
+          point_helper.x = normal_vector_end(0);
+          point_helper.y = normal_vector_end(1);
+          point_helper.z = normal_vector_end(2);
+          normal_vector_marker.points.push_back(point_helper);
+          normal_vector_marker.pose.orientation.w = 1.0;
+          normal_vector_marker.scale.x = 0.005;
+          normal_vector_marker.scale.y = 0.01;
+          normal_vector_marker.scale.z = 0.01;
+          normal_vector_marker.color.a = 0.6;
+          if (distances[i].distance > controller_ptr_->active_threshold){
+            normal_vector_marker.color.r = 0.0;
+            normal_vector_marker.color.g = 0.1;
+            normal_vector_marker.color.b = 0.0;
+          } else if (distances[i].distance > controller_ptr_->eps) {
+            normal_vector_marker.color.r = 1.0;
+            normal_vector_marker.color.g = 1.0;
+            normal_vector_marker.color.b = 0.0;
+          } else {
+            normal_vector_marker.color.r = 1.0;
+            normal_vector_marker.color.g = 0.0;
+            normal_vector_marker.color.b = 0.0;
+          }
+          obs_marker_array.markers.push_back(normal_vector_marker);
+        }
+        obs_pub.publish(obs_marker_array);
+      }
+    } while(false);
+  #endif // CONTROLLER_DEBUG
+
+  for (size_t i = 0; i < distances.size(); ++i){
+    FLIQC_controller_core::FLIQC_distance_input distance_input;
+    distance_input.id = i;
+    distance_input.distance = distances[i].distance;
+    distance_input.projector_control_to_dist = distances[i].projector_jointspace_to_dist.transpose();
+    distance_inputs.push_back(distance_input);
+  }
+
+  // //distance_inputs
+  // for (size_t i = 0; i < distance_inputs.size(); ++i){
+  //   ROS_INFO_STREAM("[STEP2]FLIQCJointVelocityNoEnvNode: Distance " << i << " is " 
+  //       << distance_inputs[i].distance << " with projector " << std::endl << distance_inputs[i].projector_control_to_dist);
+  // }
+  //distance_inputs activated
+  for (size_t i = 0; i < distance_inputs.size(); ++i){
+    if (distance_inputs[i].distance < controller_ptr_->active_threshold){
+      
+      ROS_INFO_STREAM("[STEP2_COND]FLIQCJointVelocityNoEnvNode: Distance " << i << " is " 
+          << distance_inputs[i].distance << " with projector " << std::endl << distance_inputs[i].projector_control_to_dist);
+    }
+  }
+
+  // run the controller
+  Eigen::VectorXd q_dot_command = controller_ptr_->runController(q_dot_guide, cost_input, distance_inputs);
+  if (goal_diff.norm() >= 0.01) {
+    for (size_t i = 0; i < 7; ++i) {
+      velocity_joint_handles_[i].setCommand(q_dot_command(i));
+    }
+  }else{
+    ROS_INFO_ONCE("LCQPControllerFrankaModel: Goal reached with tolerance %f", goal_diff.norm());
+    for (size_t i = 0; i < 7; ++i) {
+      velocity_joint_handles_[i].setCommand(0);
+    }
+  }
+}
+
+void FLIQCJointVelocityNoEnvNode::stopping(const ros::Time& /*time*/) {
+  // WARNING: DO NOT SEND ZERO VELOCITIES HERE AS IN CASE OF ABORTING DURING MOTION
+  // A JUMP TO ZERO WILL BE COMMANDED PUTTING HIGH LOADS ON THE ROBOT. LET THE DEFAULT
+  // BUILT-IN STOPPING BEHAVIOR SLOW DOWN THE ROBOT.
+}
+
+}  // namespace fliqc_controller_ros
+
+PLUGINLIB_EXPORT_CLASS(fliqc_controller_ros::FLIQCJointVelocityNoEnvNode,
+                       controller_interface::ControllerBase)

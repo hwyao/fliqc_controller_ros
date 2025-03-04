@@ -5,3 +5,4 @@
 [submodule "submodule/robot_env_evaluator"]
 	path = submodule/robot_env_evaluator
 	url = https://github.com/riddhiman13/robot_env_evaluator
+	branch = develop

@@ -13,10 +13,14 @@ find_package(catkin REQUIRED COMPONENTS
   controller_interface
   hardware_interface
   pluginlib
+  visualization_msgs
+  geometry_msgs
 )
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
+add_subdirectory(submodule/FLIQC_controller_core)
+add_subdirectory(submodule/robot_env_evaluator)
 
 ###################################
 ## catkin specific configuration ##
@@ -52,6 +56,32 @@ include_directories(
 ## Declare a C++ library
 add_library(fliqc_controller_ros
   src/joint_velocity_example_controller.cpp
+  src/fliqc_joint_velocity_no_env_node.cpp
+)
+target_compile_features(fliqc_controller_ros PUBLIC 
+    cxx_std_17
+)
+target_link_libraries(fliqc_controller_ros PUBLIC
+  ${catkin_LIBRARIES}
+  FLIQC_controller_core
+  robot_env_evaluator
+)
+
+
+add_library(fliqc_controller_ros_debug
+  src/joint_velocity_example_controller.cpp
+  src/fliqc_joint_velocity_no_env_node.cpp
+)
+target_compile_features(fliqc_controller_ros_debug PUBLIC 
+    cxx_std_17
+)
+target_link_libraries(fliqc_controller_ros_debug PUBLIC
+  ${catkin_LIBRARIES}
+  FLIQC_controller_core
+  robot_env_evaluator
+)
+target_compile_definitions(fliqc_controller_ros_debug PUBLIC 
+  CONTROLLER_DEBUG
 )
 
 ## Add cmake target dependencies of the library
