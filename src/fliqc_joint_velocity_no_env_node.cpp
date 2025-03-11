@@ -27,7 +27,7 @@
 namespace fliqc_controller_ros {
 
 bool FLIQCJointVelocityNoEnvNode::init(hardware_interface::RobotHW* robot_hardware,
-                                          ros::NodeHandle& node_handle) {
+                                                   ros::NodeHandle& node_handle) {
   // Set the variables for this controller
   std::string controller_name = "FLIQCJointVelocityNoEnvNode";
                                             
@@ -154,7 +154,7 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
   env_evaluator_ptr_ -> computeDistances(q, obstacles, distances);
   env_evaluator_ptr_ -> InspectGeomModelAndData();
 
-  // publish the obstacles
+  // publish and visualize the obstacles
   #ifdef CONTROLLER_DEBUG
   // make a publisher for the obstacle, do it in 30Hz
   do{
@@ -197,7 +197,7 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
   } while(false);
   #endif // CONTROLLER_DEBUG
 
-  // collect the distance array information
+  // Calculate the targeted velocity goal
   Eigen::VectorXd q_dot_guide(dim_q_);
   
   Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
@@ -218,7 +218,7 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
   Eigen::MatrixXd Jpos = J.block<3, 7>(0, 0);
   q_dot_guide = Jpos.jacobiSvd(Eigen::ComputeThinU | Eigen::ComputeThinV).solve(goal_diff_regularized);
   
-  // publish the controller start and goal information
+  // publish and visualize the controller start and goal information
   #ifdef CONTROLLER_DEBUG
   do{
     static ros::NodeHandle node_handle;
@@ -279,7 +279,7 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
         diff_arrow.color.b = 0.0;
         obs_marker_array.markers.push_back(diff_arrow);
 
-        // The end of velocity goal 
+        // The velocity guide vector
         visualization_msgs::Marker q_dot_guide_marker;
         q_dot_guide_marker.header.frame_id = "panda_link0";
         q_dot_guide_marker.header.stamp = ros::Time::now();
@@ -322,7 +322,7 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
   //       << distances[i].projector_jointspace_to_dist.transpose());
   // }
   
-  // publish the controller information
+  // publish and visualize the world enviroment calculation information
   #ifdef CONTROLLER_DEBUG
     do{
       static ros::NodeHandle node_handle;
@@ -450,19 +450,20 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
     distance_inputs.push_back(distance_input);
   }
 
-  // //distance_inputs
+  // //debug: distance_inputs
   // for (size_t i = 0; i < distance_inputs.size(); ++i){
   //   ROS_INFO_STREAM("[STEP2]FLIQCJointVelocityNoEnvNode: Distance " << i << " is " 
   //       << distance_inputs[i].distance << " with projector " << std::endl << distance_inputs[i].projector_control_to_dist);
   // }
-  //distance_inputs activated
-  for (size_t i = 0; i < distance_inputs.size(); ++i){
-    if (distance_inputs[i].distance < controller_ptr_->active_threshold){
+
+  //debug: distance_inputs activated
+  // for (size_t i = 0; i < distance_inputs.size(); ++i){
+  //   if (distance_inputs[i].distance < controller_ptr_->active_threshold){
       
-      ROS_INFO_STREAM("[STEP2_COND]FLIQCJointVelocityNoEnvNode: Distance " << i << " is " 
-          << distance_inputs[i].distance << " with projector " << std::endl << distance_inputs[i].projector_control_to_dist);
-    }
-  }
+  //     ROS_INFO_STREAM("[STEP2_COND]FLIQCJointVelocityNoEnvNode: Distance " << i << " is " 
+  //         << distance_inputs[i].distance << " with projector " << std::endl << distance_inputs[i].projector_control_to_dist);
+  //   }
+  // }
 
   // run the controller
   Eigen::VectorXd q_dot_command = controller_ptr_->runController(q_dot_guide, cost_input, distance_inputs);
