@@ -5,11 +5,11 @@
 #include <string>
 #include <vector>
 
+#include <ros/node_handle.h>
+#include <ros/time.h>
 #include <controller_interface/multi_interface_controller.h>
 #include <hardware_interface/joint_command_interface.h>
 #include <hardware_interface/robot_hw.h>
-#include <ros/node_handle.h>
-#include <ros/time.h>
 
 #include <FLIQC_controller_core/FLIQC_controllers.hpp>
 #include <robot_env_evaluator/robot_env_evaluator.hpp>
@@ -27,7 +27,6 @@ class FLIQCJointVelocityNoEnvNode : public controller_interface::MultiInterfaceC
   void stopping(const ros::Time&) override;
 
  private:
-  hardware_interface::VelocityJointInterface* velocity_joint_interface_;
   std::vector<hardware_interface::JointHandle> velocity_joint_handles_;
   ros::Duration elapsed_time_;
 

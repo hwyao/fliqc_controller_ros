@@ -28,69 +28,64 @@ namespace fliqc_controller_ros {
 
 bool FLIQCJointVelocityNoEnvNode::init(hardware_interface::RobotHW* robot_hardware,
                                           ros::NodeHandle& node_handle) {
-  // Get robot arm id and joint names parameters
+  // Set the variables for this controller
+  std::string controller_name = "FLIQCJointVelocityNoEnvNode";
+                                            
+  // Get robot arm id, joint names and EE names parameters
   std::string arm_id;
-  READ_PARAM(node_handle, "FLIQCJointVelocityNoEnvNode", "arm_id", arm_id);
+  READ_PARAM(node_handle, controller_name, "arm_id", arm_id);
 
   std::vector<std::string> joint_names;
-  READ_PARAM_SILENT(node_handle, "FLIQCJointVelocityNoEnvNode", "joint_names", joint_names);
+  READ_PARAM_SILENT(node_handle, controller_name, "joint_names", joint_names);
   
-  // Get the control interface of the robot joints
   dim_q_ = joint_names.size();
 
-  velocity_joint_interface_ = robot_hardware->get<hardware_interface::VelocityJointInterface>();
-  if (velocity_joint_interface_ == nullptr) {
-    ROS_ERROR("FLIQCJointVelocityNoEnvNode: Error getting velocity joint interface from hardware!");
-    return false;
-  }
-
+  // Get the control interface of the robot joints
+  auto velocity_joint_interface_ = robot_hardware->get<hardware_interface::VelocityJointInterface>();
+  CHECK_NOT_EMPTY(controller_name, velocity_joint_interface_ == nullptr);
   velocity_joint_handles_.resize(dim_q_);
   for (size_t i = 0; i < dim_q_; ++i) {
-    try {
+    CATCH_BLOCK(controller_name, 
       velocity_joint_handles_[i] = velocity_joint_interface_->getHandle(joint_names[i]);
-    } catch (const hardware_interface::HardwareInterfaceException& ex) {
-      ROS_ERROR_STREAM("FLIQCJointVelocityNoEnvNode: Exception getting joint handles: " << ex.what());
-      return false;
-    }
+    );
   }
 
-  // Initialize the controller
+  // Initialize the FLIQC controller in FLIQC_controller_core
   controller_ptr_ = std::make_unique<FLIQC_controller_core::FLIQC_controller_joint_velocity_basic>(dim_q_);
   
-  // controller parameters: lcqpow parameters
-  READ_PARAM(node_handle, "FLIQCJointVelocityNoEnvNode", 
+  // Get controller parameters: lcqpow parameters
+  READ_PARAM(node_handle, controller_name, 
       "/lcqpow/complementarityTolerance", controller_ptr_->lcqp_solver.complementarityTolerance);
-  READ_PARAM(node_handle, "FLIQCJointVelocityNoEnvNode",
+  READ_PARAM(node_handle, controller_name,
       "/lcqpow/stationarityTolerance", controller_ptr_->lcqp_solver.stationarityTolerance);
-  READ_PARAM(node_handle, "FLIQCJointVelocityNoEnvNode",
+  READ_PARAM(node_handle, controller_name,
       "/lcqpow/initialPenaltyParameter", controller_ptr_->lcqp_solver.initialPenaltyParameter);
-  READ_PARAM(node_handle, "FLIQCJointVelocityNoEnvNode",
+  READ_PARAM(node_handle, controller_name,
       "/lcqpow/penaltyUpdateFactor", controller_ptr_->lcqp_solver.penaltyUpdateFactor);
-
   controller_ptr_->lcqp_solver.updateOptions();
 
-  // controller parameters: fliqc_controller_core parameters
-  READ_PARAM(node_handle, "FLIQCJointVelocityNoEnvNode", 
+  // Get controller parameters: fliqc_controller_core parameters
+  READ_PARAM(node_handle, controller_name, 
       "/fliqc_controller_core/buffer_history", controller_ptr_->buffer_history);
-  READ_PARAM(node_handle, "FLIQCJointVelocityNoEnvNode",
+  READ_PARAM(node_handle, controller_name,
       "/fliqc_controller_core/enable_lambda_constraint_in_L", controller_ptr_->enable_lambda_constraint_in_L);
-  READ_PARAM(node_handle, "FLIQCJointVelocityNoEnvNode",
+  READ_PARAM(node_handle, controller_name,
       "/fliqc_controller_core/enable_lambda_constraint_in_x", controller_ptr_->enable_lambda_constraint_in_x);
-  READ_PARAM(node_handle, "FLIQCJointVelocityNoEnvNode",
+  READ_PARAM(node_handle, controller_name,
       "/fliqc_controller_core/lambda_max", controller_ptr_->lambda_max);
-  READ_PARAM(node_handle, "FLIQCJointVelocityNoEnvNode",
+  READ_PARAM(node_handle, controller_name,
       "/fliqc_controller_core/enable_esc_vel_constraint", controller_ptr_->enable_esc_vel_constraint);
-  READ_PARAM(node_handle, "FLIQCJointVelocityNoEnvNode",
+  READ_PARAM(node_handle, controller_name,
       "/fliqc_controller_core/esc_vel_max", controller_ptr_->esc_vel_max);
-  READ_PARAM(node_handle, "FLIQCJointVelocityNoEnvNode",
+  READ_PARAM(node_handle, controller_name,
       "/fliqc_controller_core/dt", controller_ptr_->dt);
-  READ_PARAM(node_handle, "FLIQCJointVelocityNoEnvNode",
+  READ_PARAM(node_handle, controller_name,
       "/fliqc_controller_core/eps", controller_ptr_->eps);
-  READ_PARAM(node_handle, "FLIQCJointVelocityNoEnvNode",
+  READ_PARAM(node_handle, controller_name,
       "/fliqc_controller_core/active_threshold", controller_ptr_->active_threshold);
   
   std::vector<double> q_dot_max;
-  READ_PARAM_SILENT(node_handle, "FLIQCJointVelocityNoEnvNode", "/fliqc_controller_core/q_dot_max", q_dot_max);
+  READ_PARAM_SILENT(node_handle, controller_name, "/fliqc_controller_core/q_dot_max", q_dot_max);
   controller_ptr_->q_dot_max = Eigen::Map<Eigen::VectorXd>(q_dot_max.data(), q_dot_max.size());
   ROS_INFO_STREAM("FLIQCJointVelocityNoEnvNode: Getting parameter q_dot_max: " << controller_ptr_->q_dot_max.transpose());
 
@@ -204,8 +199,6 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
 
   // collect the distance array information
   Eigen::VectorXd q_dot_guide(dim_q_);
-  FLIQC_controller_core::FLIQC_cost_input cost_input;
-  std::vector<FLIQC_controller_core::FLIQC_distance_input> distance_inputs;
   
   Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
   Eigen::MatrixXd J = Eigen::MatrixXd::Zero(6, dim_q_);
@@ -317,6 +310,8 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
   } while(false);
   #endif // CONTROLLER_DEBUG
 
+  // Calculate the controller cost input
+  FLIQC_controller_core::FLIQC_cost_input cost_input;
   cost_input.Q = Eigen::MatrixXd::Identity(dim_q_, dim_q_);
   cost_input.g = Eigen::VectorXd::Zero(dim_q_);
 
@@ -445,6 +440,8 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
     } while(false);
   #endif // CONTROLLER_DEBUG
 
+  // Get the obstacle distance information and convert it as the distance input for the controller
+  std::vector<FLIQC_controller_core::FLIQC_distance_input> distance_inputs;
   for (size_t i = 0; i < distances.size(); ++i){
     FLIQC_controller_core::FLIQC_distance_input distance_input;
     distance_input.id = i;

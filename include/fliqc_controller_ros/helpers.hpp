@@ -16,4 +16,18 @@
     ROS_INFO_STREAM(controller_name << ": Getting parameter " << param_name << ": " << param_variable); \
   }
 
+#define CHECK_NOT_EMPTY(controller_name, empty_evaluation) \
+  if (empty_evaluation) { \
+    ROS_ERROR_STREAM(controller_name << ": Empty evaluation by" << #empty_evaluation); \
+    return false; \
+  } \
+
+#define CATCH_BLOCK(controller_name, action_block) \
+  try { \
+    action_block \
+  } catch (const hardware_interface::HardwareInterfaceException& ex) {  \
+    ROS_ERROR_STREAM(controller_name << ": Exception when executing\n" << #action_block << "\n" << ex.what());  \
+    return false;  \
+  }
+
 #endif  // FLIQC_CONTROLLER_ROS_HELPERS_HPP_
