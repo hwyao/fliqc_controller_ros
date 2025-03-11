@@ -100,13 +100,13 @@ bool FLIQCJointVelocityNoEnvNode::init(hardware_interface::RobotHW* robot_hardwa
   env_evaluator_ptr_ = std::make_unique<robot_env_evaluator::RobotEnvEvaluator>(model, ee_name, collision_model);
 
   // simulate virtual dynamic obstacle information
-  obsList_.push_back(Eigen::Vector3d(0.35, 0.5, 0.4)); 
+  obsList_.push_back(Eigen::Vector3d(0.25, 0.5, 0.6)); 
   obsRadiusList_.push_back(0.05);
   obsList_.push_back(Eigen::Vector3d(-0.13, -0.52, 0.5)); 
   obsRadiusList_.push_back(0.1);
-  obsList_.push_back(Eigen::Vector3d(0.25, 0.3, 0.4)); 
+  obsList_.push_back(Eigen::Vector3d(0.25, 0.3, 0.6)); 
   obsRadiusList_.push_back(0.05);
-  obsList_.push_back(Eigen::Vector3d(0.30, 0.3, 0.4));
+  obsList_.push_back(Eigen::Vector3d(0.30, 0.3, 0.6));
   obsRadiusList_.push_back(0.05); 
 
   return true;
