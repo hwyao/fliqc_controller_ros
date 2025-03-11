@@ -1,0 +1,12 @@
+<library path="lib/libfliqc_controller_ros_debug">
+  <class name="fliqc_controller_ros/JointVelocityExampleControllerDebug" type="fliqc_controller_ros::JointVelocityExampleController" base_class_type="controller_interface::ControllerBase">
+      <description>
+          The same JointVelocityExampleController to check if the basic configuration works correctly.
+      </description>
+  </class>
+  <class name="fliqc_controller_ros/FLIQCJointVelocityNoEnvNodeDebug" type="fliqc_controller_ros::FLIQCJointVelocityNoEnvNode" base_class_type="controller_interface::ControllerBase">
+      <description>
+          The joint velocity controller based on FLIQC planner and without ros node environment.
+      </description>
+  </class>
+</library>
