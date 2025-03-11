@@ -7,6 +7,7 @@
 #include <fliqc_controller_ros/fliqc_joint_velocity_no_env_node.hpp>
 #include <fliqc_controller_ros/helpers.hpp>
 #include "robot_env_evaluator/robot_env_evaluator_path.h"
+#include "robot_env_evaluator/robot_presets.hpp"
 
 #include <cmath>
 #include <array>
@@ -93,37 +94,15 @@ bool FLIQCJointVelocityNoEnvNode::init(hardware_interface::RobotHW* robot_hardwa
   controller_ptr_->q_dot_max = Eigen::Map<Eigen::VectorXd>(q_dot_max.data(), q_dot_max.size());
   ROS_INFO_STREAM("FLIQCJointVelocityNoEnvNode: Getting parameter q_dot_max: " << controller_ptr_->q_dot_max.transpose());
 
-  const std::string robot_path = "/opt/openrobots/share/example-robot-data";
-  const std::string urdf_filename = robot_path + "/robots/panda_description/urdf/panda.urdf";
-  const std::string stl_filename = robot_path + "/robots/panda_description/meshes/";
-  std::string srdf_filename = ROBOT_ENV_EVALUATOR_PATH;
-  srdf_filename += "/scripts/panda-alternative.srdf";
-    
-  pinocchio::Model model_original;
+  // Initialize the robot environment evaluator in robot_env_evaluator
   pinocchio::Model model;
-  pinocchio::urdf::buildModel(urdf_filename, model_original, false);
-  std::vector<pinocchio::JointIndex> joints_to_lock = {8, 9};
-  Eigen::VectorXd lock_positions(9);
-  lock_positions << 0, 0, 0, 0, 0, 0, 0, 0.03, 0.03;
-  pinocchio::buildReducedModel(model_original, joints_to_lock, lock_positions, model);
-  
+  std::string ee_name;
   pinocchio::GeometryModel collision_model;
-  pinocchio::urdf::buildGeom(model, urdf_filename, pinocchio::COLLISION, collision_model, "/opt/openrobots/share");
-  collision_model.addAllCollisionPairs();
-  pinocchio::srdf::removeCollisionPairs(model, collision_model, srdf_filename);
-  collision_model.geometryObjects[0].disableCollision = true;
-  collision_model.geometryObjects[1].disableCollision = true;
-  collision_model.geometryObjects[2].disableCollision = true;
-  collision_model.geometryObjects[9].disableCollision = true;
-  collision_model.geometryObjects[10].disableCollision = true;
-  collision_model.geometryObjects[11].disableCollision = true;
-  collision_model.geometryObjects[12].disableCollision = true;
-  collision_model.geometryObjects[13].disableCollision = true;
-  collision_model.geometryObjects[14].disableCollision = true;
-  collision_model.geometryObjects[15].disableCollision = true;
-  collision_model.geometryObjects[16].disableCollision = true;
+  auto preset = robot_env_evaluator::RobotPresetFactory::createRobotPreset("FrankaEmika");
+  CHECK_NOT_EMPTY(controller_name, preset == nullptr);
+  preset->getPresetRobot(model, ee_name, collision_model);
 
-  env_evaluator_ptr_ = std::make_unique<robot_env_evaluator::RobotEnvEvaluator>(model, collision_model);
+  env_evaluator_ptr_ = std::make_unique<robot_env_evaluator::RobotEnvEvaluator>(model, ee_name, collision_model);
 
   // simulate virtual dynamic obstacle information
   obsList_.push_back(Eigen::Vector3d(0.35, 0.5, 0.4)); 
@@ -229,9 +208,9 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
   std::vector<FLIQC_controller_core::FLIQC_distance_input> distance_inputs;
   
   Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
-  Eigen::MatrixXd Jpos = Eigen::MatrixXd::Zero(6, dim_q_);
-  env_evaluator_ptr_ -> forwardKinematics(q, 7, T); // 0 base link, 1-7 are the different seven joints
-  env_evaluator_ptr_ -> jacobian(q, 7, Jpos);
+  Eigen::MatrixXd J = Eigen::MatrixXd::Zero(6, dim_q_);
+  env_evaluator_ptr_ -> forwardKinematics(q, T);
+  env_evaluator_ptr_ -> jacobian(q, J);
 
   Eigen::Vector3d goal_(0.1, 0.450, 0.55);
   Eigen::Vector3d now_ = T.block<3, 1>(0, 3);
@@ -243,7 +222,7 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
   } else {
     goal_diff_regularized = goal_diff * 0.5;
   }
-  Jpos = Jpos.block<3, 7>(0, 0);
+  Eigen::MatrixXd Jpos = J.block<3, 7>(0, 0);
   q_dot_guide = Jpos.jacobiSvd(Eigen::ComputeThinU | Eigen::ComputeThinV).solve(goal_diff_regularized);
   
   // publish the controller start and goal information
