@@ -1,5 +1,3 @@
-// Copyright (c) 2023 Franka Robotics GmbH
-// Use of this source code is governed by the Apache-2.0 license, see LICENSE
 #include <pinocchio/parsers/urdf.hpp>
 #include <pinocchio/parsers/srdf.hpp>
 #include <pinocchio/algorithm/model.hpp>
