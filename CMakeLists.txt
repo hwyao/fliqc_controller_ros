@@ -15,6 +15,7 @@ find_package(catkin REQUIRED COMPONENTS
   pluginlib
   visualization_msgs
   geometry_msgs
+  moveit_msgs
 )
 
 ## System dependencies are found with CMake's conventions
@@ -57,6 +58,7 @@ include_directories(
 add_library(fliqc_controller_ros
   src/joint_velocity_example_controller.cpp
   src/fliqc_joint_velocity_no_env_node.cpp
+  src/fliqc_joint_velocity_standard.cpp
 )
 target_compile_features(fliqc_controller_ros PUBLIC 
     cxx_std_17
@@ -71,6 +73,7 @@ target_link_libraries(fliqc_controller_ros PUBLIC
 add_library(fliqc_controller_ros_debug
   src/joint_velocity_example_controller.cpp
   src/fliqc_joint_velocity_no_env_node.cpp
+  src/fliqc_joint_velocity_standard.cpp
 )
 target_compile_features(fliqc_controller_ros_debug PUBLIC 
     cxx_std_17
