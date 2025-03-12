@@ -11,7 +11,7 @@
     <arg name="controller" value="fliqc_joint_velocity_standard_debug" />
   </include>
   
-  <node name="main_node" pkg="multi_agent_vector_fields" type="test_node" output="screen"/>
+  <node name="main_node" pkg="multi_agent_vector_fields" type="test_node"/>
 
   <node pkg="rviz" type="rviz" output="screen" name="rviz" args="-d $(find fliqc_controller_ros)/launch/sim_fliqc_joint_velocity_no_env_node_debug.rviz -f $(arg arm_id)_link0 --splash-screen $(find franka_visualization)/splash.png"/>
 </launch>

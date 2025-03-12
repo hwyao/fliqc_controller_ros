@@ -97,18 +97,21 @@ bool FLIQCJointVelocityStandard::init(hardware_interface::RobotHW* robot_hardwar
 
   env_evaluator_ptr_ = std::make_unique<robot_env_evaluator::RobotEnvEvaluator>(model, ee_name, collision_model);
 
+  
+  // subscribe to the targeted velocity and goal to distance from the multi-agent system
+  ros::Subscriber targeted_velocity_sub = node_handle.subscribe("/agent_twist", 1, &FLIQCJointVelocityStandard::targetedVelocityCallback, this);
+  ros::Subscriber dist_to_goal_sub = node_handle.subscribe("/distance_to_goal", 1, &FLIQCJointVelocityStandard::distanceToGoalCallback, this);
+
   // subscribe to the planning scene information and wait for the first received message
   ros::Subscriber planning_scene_sub = node_handle.subscribe("/planning_scene", 1, &FLIQCJointVelocityStandard::planningSceneCallback, this);
-  // wait until first message received and obstacles_ is not empty
+  
+  // wait until first message received from all subscribers
   ros::Rate rate(10);
-  while (ros::ok() && obstacles_.empty()) {
+  while (ros::ok() && (obstacles_.empty() || targeted_velocity_ == Eigen::Vector3d(-100,-100,-100) || distance_to_goal_ == -100)) {
       ros::spinOnce();
-      ROS_INFO_STREAM_THROTTLE(1, controller_name << "Waiting for first planning_scene message...");
+      ROS_INFO_STREAM_THROTTLE(1, controller_name << "Waiting for first of all messages...");
       rate.sleep();
   }
-
-  // subscribe to the targeted velocity of the multi-agent system
-  ros::Subscriber targeted_velocity_sub = node_handle.subscribe("/agent_twist", 1, &FLIQCJointVelocityStandard::targetedVelocityCallback, this);
 
   return true;
 }
@@ -139,8 +142,12 @@ void FLIQCJointVelocityStandard::planningSceneCallback(const moveit_msgs::Planni
   }
 }
 
-void FLIQCJointVelocityStandard::targetedVelocityCallback(const geometry_msgs::Twist::ConstPtr& msg) {
-  targeted_velocity_ = Eigen::Vector3d(msg->linear.x, msg->linear.y, msg->linear.z);
+void FLIQCJointVelocityStandard::targetedVelocityCallback(const geometry_msgs::TwistStamped::ConstPtr& msg) {
+  targeted_velocity_ = Eigen::Vector3d(msg->twist.linear.x, msg->twist.linear.y, msg->twist.linear.z);
+}
+
+void FLIQCJointVelocityStandard::distanceToGoalCallback(const std_msgs::Float64::ConstPtr& msg) {
+  distance_to_goal_ = msg->data;
 }
 
 void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
