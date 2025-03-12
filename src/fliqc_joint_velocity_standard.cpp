@@ -107,6 +107,9 @@ bool FLIQCJointVelocityStandard::init(hardware_interface::RobotHW* robot_hardwar
       rate.sleep();
   }
 
+  // subscribe to the targeted velocity of the multi-agent system
+  ros::Subscriber targeted_velocity_sub = node_handle.subscribe("/agent_twist", 1, &FLIQCJointVelocityStandard::targetedVelocityCallback, this);
+
   return true;
 }
 
@@ -136,6 +139,10 @@ void FLIQCJointVelocityStandard::planningSceneCallback(const moveit_msgs::Planni
   }
 }
 
+void FLIQCJointVelocityStandard::targetedVelocityCallback(const geometry_msgs::Twist::ConstPtr& msg) {
+  targeted_velocity_ = Eigen::Vector3d(msg->linear.x, msg->linear.y, msg->linear.z);
+}
+
 void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
                                             const ros::Duration& period) {
   elapsed_time_ += period;
@@ -157,9 +164,8 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
   env_evaluator_ptr_ -> forwardKinematics(q, T);
   env_evaluator_ptr_ -> jacobian(q, J);
 
-  Eigen::Vector3d goal_(0.1, 0.450, 0.55);
   Eigen::Vector3d now_ = T.block<3, 1>(0, 3);
-  Eigen::Vector3d goal_diff = goal_ - now_;
+  Eigen::Vector3d goal_diff = targeted_velocity_;
   Eigen::Vector3d goal_diff_regularized = goal_diff;
   double vel = 0.05;
   if (goal_diff_regularized.norm() > (vel/0.5)){
@@ -183,27 +189,6 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
       }
       visualization_msgs::MarkerArray obs_marker_array;
       geometry_msgs::Point point_helper;
-        // The goal position
-        visualization_msgs::Marker goal_marker;
-        goal_marker.header.frame_id = "panda_link0";
-        goal_marker.header.stamp = ros::Time::now();
-        goal_marker.ns = "controller_info";
-        goal_marker.id = 0;
-        goal_marker.type = visualization_msgs::Marker::SPHERE;
-        goal_marker.action = visualization_msgs::Marker::ADD;
-        goal_marker.pose.position.x = goal_(0);
-        goal_marker.pose.position.y = goal_(1);
-        goal_marker.pose.position.z = goal_(2);
-        goal_marker.pose.orientation.w = 1.0;
-        goal_marker.scale.x = 0.01;
-        goal_marker.scale.y = 0.01;
-        goal_marker.scale.z = 0.01;
-        goal_marker.color.a = 1.0;
-        goal_marker.color.r = 1.0;
-        goal_marker.color.g = 0.0;
-        goal_marker.color.b = 0.0;
-        obs_marker_array.markers.push_back(goal_marker);
-
         // The current EE position
         visualization_msgs::Marker diff_arrow;
         diff_arrow.header.frame_id = "panda_link0";

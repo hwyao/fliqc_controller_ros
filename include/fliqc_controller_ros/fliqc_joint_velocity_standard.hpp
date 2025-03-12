@@ -12,7 +12,7 @@
 #include <FLIQC_controller_core/FLIQC_controllers.hpp>
 #include <robot_env_evaluator/robot_env_evaluator.hpp>
 
-#include <geometry_msgs/TwistStamped.h>
+#include <geometry_msgs/Twist.h>
 #include <moveit_msgs/PlanningScene.h>
 
 namespace fliqc_controller_ros {
@@ -26,6 +26,7 @@ class FLIQCJointVelocityStandard : public controller_interface::MultiInterfaceCo
   void stopping(const ros::Time&) override;
 
   void planningSceneCallback(const moveit_msgs::PlanningScene::ConstPtr& msg);
+  void targetedVelocityCallback(const geometry_msgs::Twist::ConstPtr& msg);
 
  private:
   std::vector<hardware_interface::JointHandle> velocity_joint_handles_;
@@ -38,6 +39,8 @@ class FLIQCJointVelocityStandard : public controller_interface::MultiInterfaceCo
 
   // the obstacle list
   std::vector<robot_env_evaluator::obstacleInput> obstacles_;
+  // the targeted velocity
+  Eigen::Vector3d targeted_velocity_;
 };
 
 }  // namespace fliqc_controller_ros
