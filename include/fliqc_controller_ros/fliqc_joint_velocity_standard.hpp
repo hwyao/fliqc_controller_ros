@@ -44,6 +44,7 @@ class FLIQCJointVelocityStandard : public controller_interface::MultiInterfaceCo
   // the subscriber list
   ros::Subscriber targeted_velocity_sub_;
   ros::Subscriber dist_to_goal_sub_;
+  ros::Subscriber planning_scene_sub_;
   // the targeted velocity and distance to goal
   Eigen::Vector3d targeted_velocity_ = Eigen::Vector3d(-100,-100,-100);
   double distance_to_goal_ = -100;

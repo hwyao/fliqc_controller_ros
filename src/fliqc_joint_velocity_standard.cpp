@@ -99,11 +99,11 @@ bool FLIQCJointVelocityStandard::init(hardware_interface::RobotHW* robot_hardwar
 
   
   // subscribe to the targeted velocity and goal to distance from the multi-agent system
-  ros::Subscriber targeted_velocity_sub_ = node_handle.subscribe("/agent_twist_global", 1, &FLIQCJointVelocityStandard::targetedVelocityCallback, this);
-  ros::Subscriber dist_to_goal_sub_ = node_handle.subscribe("/distance_to_goal", 1, &FLIQCJointVelocityStandard::distanceToGoalCallback, this);
+  targeted_velocity_sub_ = node_handle.subscribe("/agent_twist_global", 1, &FLIQCJointVelocityStandard::targetedVelocityCallback, this);
+  dist_to_goal_sub_ = node_handle.subscribe("/distance_to_goal", 1, &FLIQCJointVelocityStandard::distanceToGoalCallback, this);
 
   // subscribe to the planning scene information and wait for the first received message
-  ros::Subscriber planning_scene_sub = node_handle.subscribe("/planning_scene", 1, &FLIQCJointVelocityStandard::planningSceneCallback, this);
+  planning_scene_sub_ = node_handle.subscribe("/planning_scene", 1, &FLIQCJointVelocityStandard::planningSceneCallback, this);
   
   // wait until first message received from all subscribers
   ros::Rate rate(10);
