@@ -2,6 +2,7 @@
 
 #include <string>
 #include <vector>
+#include <mutex>
 
 #include <ros/node_handle.h>
 #include <ros/time.h>
@@ -48,6 +49,8 @@ class FLIQCJointVelocityStandard : public controller_interface::MultiInterfaceCo
   // the targeted velocity and distance to goal
   Eigen::Vector3d targeted_velocity_ = Eigen::Vector3d(-100,-100,-100);
   double distance_to_goal_ = -100;
+  // the mutex for the obstacles
+  std::mutex obstacles_mutex_;
 };
 
 }  // namespace fliqc_controller_ros

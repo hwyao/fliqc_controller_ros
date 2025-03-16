@@ -9,6 +9,7 @@
 
 #include <cmath>
 #include <array>
+#include <mutex>
 
 #include <ros/ros.h>
 #include <pluginlib/class_list_macros.h>
@@ -121,6 +122,7 @@ void FLIQCJointVelocityStandard::starting(const ros::Time& /* time */) {
 }
 
 void FLIQCJointVelocityStandard::planningSceneCallback(const moveit_msgs::PlanningScene::ConstPtr& msg) {
+  std::lock_guard<std::mutex> lock(obstacles_mutex_);
   obstacles_.clear();
   for (const auto& obj : msg->world.collision_objects) {
       if (obj.primitives.empty()){
@@ -144,7 +146,6 @@ void FLIQCJointVelocityStandard::planningSceneCallback(const moveit_msgs::Planni
 
 void FLIQCJointVelocityStandard::targetedVelocityCallback(const geometry_msgs::TwistStamped::ConstPtr& msg) {
   targeted_velocity_ = Eigen::Vector3d(msg->twist.linear.x, msg->twist.linear.y, msg->twist.linear.z);
-  ROS_INFO_THROTTLE(1, "The latest targeted velocity is %f, %f, %f", msg->twist.linear.x, msg->twist.linear.y, msg->twist.linear.z);
 }
 
 void FLIQCJointVelocityStandard::distanceToGoalCallback(const std_msgs::Float64::ConstPtr& msg) {
@@ -161,8 +162,11 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
   for (size_t i = 0; i < dim_q_; ++i) {
     q(i) = velocity_joint_handles_[i].getPosition();
   }
-  env_evaluator_ptr_ -> computeDistances(q, obstacles_, distances);
-  env_evaluator_ptr_ -> InspectGeomModelAndData();
+  {
+    std::lock_guard<std::mutex> lock(obstacles_mutex_);
+    env_evaluator_ptr_->computeDistances(q, obstacles_, distances);
+  }
+  env_evaluator_ptr_->InspectGeomModelAndData();
 
   // Calculate the targeted velocity goal
   Eigen::VectorXd q_dot_guide(dim_q_);
@@ -174,7 +178,6 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
 
   Eigen::Vector3d now_ = T.block<3, 1>(0, 3);
   Eigen::Vector3d goal_diff = targeted_velocity_;
-  ROS_INFO_THROTTLE(0.5, "The targeted velocity is %f, %f, %f", goal_diff(0), goal_diff(1), goal_diff(2));
   Eigen::Vector3d goal_diff_regularized = goal_diff;
   double vel = 0.05;
   if (goal_diff_regularized.norm() > (vel/0.5)){
