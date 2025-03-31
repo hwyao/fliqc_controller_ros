@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.0.2)
+cmake_minimum_required(VERSION 3.8.0)
 project(fliqc_controller_ros)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
@@ -77,7 +77,7 @@ add_library(fliqc_controller_ros_debug
   src/fliqc_joint_velocity_standard.cpp
 )
 target_compile_features(fliqc_controller_ros_debug PUBLIC 
-    cxx_std_17
+    cxx_std_17                                                # requires CMake 3.8
 )
 target_link_libraries(fliqc_controller_ros_debug PUBLIC
   ${catkin_LIBRARIES}
