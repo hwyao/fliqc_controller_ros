@@ -30,6 +30,7 @@ class APFJointVelocity : public controller_interface::MultiInterfaceController<
   void planningSceneCallback(const moveit_msgs::PlanningScene::ConstPtr& msg);
   void targetedVelocityCallback(const geometry_msgs::TwistStamped::ConstPtr& msg);
   void distanceToGoalCallback(const std_msgs::Float64::ConstPtr& msg);
+  void goalPosCallback(const geometry_msgs::Point::ConstPtr& msg);
 
  private:
   std::vector<hardware_interface::JointHandle> velocity_joint_handles_;
@@ -46,9 +47,12 @@ class APFJointVelocity : public controller_interface::MultiInterfaceController<
   ros::Subscriber targeted_velocity_sub_;
   ros::Subscriber dist_to_goal_sub_;
   ros::Subscriber planning_scene_sub_;
+  ros::Subscriber goal_pos_sub_; 
   // the targeted velocity and distance to goal
   Eigen::Vector3d targeted_velocity_ = Eigen::Vector3d(-100,-100,-100);
   double distance_to_goal_ = -100;
+
+  Eigen::Vector3d goal_pos_ = Eigen::Vector3d::Zero(); // store goal pos 
   // the mutex for the obstacles
   std::mutex obstacles_mutex_;
 };
