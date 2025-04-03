@@ -60,6 +60,7 @@ add_library(fliqc_controller_ros
   src/joint_velocity_example_controller.cpp
   src/fliqc_joint_velocity_no_env_node.cpp
   src/fliqc_joint_velocity_standard.cpp
+  src/apf_joint_velocity.cpp
 )
 target_compile_features(fliqc_controller_ros PUBLIC 
     cxx_std_17
@@ -75,6 +76,7 @@ add_library(fliqc_controller_ros_debug
   src/joint_velocity_example_controller.cpp
   src/fliqc_joint_velocity_no_env_node.cpp
   src/fliqc_joint_velocity_standard.cpp
+  src/apf_joint_velocity.cpp
 )
 target_compile_features(fliqc_controller_ros_debug PUBLIC 
     cxx_std_17                                                # requires CMake 3.8
