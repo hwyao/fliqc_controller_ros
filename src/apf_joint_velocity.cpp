@@ -25,8 +25,8 @@
 
 namespace fliqc_controller_ros {
 
-bool APFJointVelocity::init(hardware_interface::RobotHW* robot_hardware,
-                                                   ros::NodeHandle& node_handle) {
+bool APFJointVelocity::init(hardware_interface::RobotHW* robot_hardware, ros::NodeHandle& node_handle) 
+{
   // Set the variables for this controller
   std::string controller_name = "APFJointVelocity";
                                             
@@ -41,15 +41,18 @@ bool APFJointVelocity::init(hardware_interface::RobotHW* robot_hardware,
 
   // Get the control interface of the robot joints
   auto velocity_joint_interface_ = robot_hardware->get<hardware_interface::VelocityJointInterface>();
+
   CHECK_NOT_EMPTY(controller_name, velocity_joint_interface_ == nullptr);
+
   velocity_joint_handles_.resize(dim_q_);
-  for (size_t i = 0; i < dim_q_; ++i) {
-    CATCH_BLOCK(controller_name, 
-      velocity_joint_handles_[i] = velocity_joint_interface_->getHandle(joint_names[i]);
+
+  for (size_t i = 0; i < dim_q_; ++i) 
+  {
+    CATCH_BLOCK(controller_name,velocity_joint_handles_[i] = velocity_joint_interface_->getHandle(joint_names[i]);
     );
   }
 
-  // Initialize the FLIQC controller in FLIQC_controller_core
+  // Initialize the FLIQC controller in FLIQC_controller_core (Now we do not use it)
   controller_ptr_ = std::make_unique<FLIQC_controller_core::FLIQC_controller_joint_velocity_basic>(dim_q_);
   
   // Get controller parameters: lcqpow parameters
@@ -102,7 +105,7 @@ bool APFJointVelocity::init(hardware_interface::RobotHW* robot_hardware,
   // subscribe to the targeted velocity and goal to distance from the multi-agent system
   targeted_velocity_sub_ = node_handle.subscribe("/agent_twist_global", 1, &APFJointVelocity::targetedVelocityCallback, this);
   dist_to_goal_sub_ = node_handle.subscribe("/distance_to_goal", 1, &APFJointVelocity::distanceToGoalCallback, this);
-
+  goal_pos_sub_ = node_handle.subscribe("/goal_position", 1, &APFJointVelocity::goalPosCallback, this);
   // subscribe to the planning scene information and wait for the first received message
   planning_scene_sub_ = node_handle.subscribe("/planning_scene", 1, &APFJointVelocity::planningSceneCallback, this);
   
@@ -114,14 +117,19 @@ bool APFJointVelocity::init(hardware_interface::RobotHW* robot_hardware,
       rate.sleep();
   }
 
+  ROS_INFO_STREAM(controller_name << "is initialized with " << dim_q_ << " joints.");
+
   return true;
 }
 
-void APFJointVelocity::starting(const ros::Time& /* time */) {
+void APFJointVelocity::starting(const ros::Time& /* time */) 
+{
   elapsed_time_ = ros::Duration(0.0);
+  ROS_INFO_STREAM("Starting APFJointVelocity controller.");
 }
 
-void APFJointVelocity::planningSceneCallback(const moveit_msgs::PlanningScene::ConstPtr& msg) {
+void APFJointVelocity::planningSceneCallback(const moveit_msgs::PlanningScene::ConstPtr& msg) 
+{
   std::lock_guard<std::mutex> lock(obstacles_mutex_);
   obstacles_.clear();
   for (const auto& obj : msg->world.collision_objects) {
@@ -129,7 +137,7 @@ void APFJointVelocity::planningSceneCallback(const moveit_msgs::PlanningScene::C
         ROS_WARN_STREAM("The object " << obj.id << " in PlanningScene has no primitive.");
         continue;
       }
-
+      
       const auto& pose = obj.primitive_poses[0];
       Eigen::Matrix4d pose_mat = Eigen::Matrix4d::Identity();
       pose_mat.block<3, 1>(0, 3) = Eigen::Vector3d(pose.position.x, pose.position.y, pose.position.z);
@@ -144,7 +152,16 @@ void APFJointVelocity::planningSceneCallback(const moveit_msgs::PlanningScene::C
   }
 }
 
-void APFJointVelocity::targetedVelocityCallback(const geometry_msgs::TwistStamped::ConstPtr& msg) {
+void APFJointVelocity::goalPosCallback(const geometry_msgs::Point::ConstPtr& msg)
+{
+  // store into goal_pos_
+  goal_pos_ = Eigen::Vector3d(msg->x, msg->y, msg->z);
+  // ROS_INFO_STREAM("Goal: " << goal_pos_.transpose());
+}
+
+
+void APFJointVelocity::targetedVelocityCallback(const geometry_msgs::TwistStamped::ConstPtr& msg) 
+{
   targeted_velocity_ = Eigen::Vector3d(msg->twist.linear.x, msg->twist.linear.y, msg->twist.linear.z);
 }
 
@@ -152,10 +169,81 @@ void APFJointVelocity::distanceToGoalCallback(const std_msgs::Float64::ConstPtr&
   distance_to_goal_ = msg->data;
 }
 
-void APFJointVelocity::update(const ros::Time& /* time */,
-                                            const ros::Duration& period) {
+void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& period) 
+{
   elapsed_time_ += period;
 
+  //STEP 0 - get current joint position and velocity
+
+  Eigen::VectorXd q(dim_q_);
+  for (size_t i = 0; i < dim_q_; i++) {
+    q(i) = velocity_joint_handles_[i].getPosition();
+  }
+
+  //STEP 1 - use Haowen env_evaluator to calculate FK and jacobian 
+  Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
+  Eigen::MatrixXd J(6, dim_q_);
+  env_evaluator_ptr_->forwardKinematics(q, T);
+  env_evaluator_ptr_->jacobian(q, J);
+
+
+  //STEP 2 - calculate EE position and attractive force 
+
+  Eigen::Vector3d ee_pos = T.block<3,1>(0,3);
+
+  Eigen::Vector3d goal_pos;
+  Eigen::Vector3d diff = goal_pos_ - ee_pos;
+  double k_att = 2.0; 
+
+  Eigen::Vector3d attract = k_att * diff; 
+
+  double max_speed = 0.1;
+  if(attract.norm() > max_speed){
+    attract = attract.normalized() * max_speed;
+  }
+
+  //STEP 3 - calculate the repulsive force from the obstacles
+
+  Eigen::Vector3d repulsive(0,0,0);
+  {
+    std::lock_guard<std::mutex> lock(obstacles_mutex_);
+    for(const auto& obs : obstacles_)
+    {
+      
+      Eigen::Vector3d obs_center = obs.obstacle_pose.block<3,1>(0,3);
+      double r = 0.05;
+      Eigen::Vector3d diff_ee = ee_pos - obs_center;
+      double dist = diff_ee.norm();
+      double real_d = dist - r;
+      double d_thresh = 0.2; 
+      if(real_d < d_thresh && real_d>1e-5){
+        double k_rep = 1.0;
+        double rep_val = k_rep*(1.0/real_d - 1.0/d_thresh)/(real_d*real_d);
+        repulsive += rep_val*(diff_ee/dist);
+      }
+    }
+  }
+
+  Eigen::Vector3d combined_vel = attract + repulsive;
+
+  Eigen::MatrixXd Jpos = J.block(0,0, 3, dim_q_); // pinv 
+  Eigen::VectorXd qdot = Jpos.jacobiSvd(Eigen::ComputeThinU | Eigen::ComputeThinV).solve(combined_vel);
+
+  if(distance_to_goal_ > 0.01)
+  {
+    for(int i=0; i<dim_q_; i++)
+    {
+      velocity_joint_handles_[i].setCommand(qdot(i));
+    }
+  } else 
+  {
+    // when reached 
+    for(int i=0; i<dim_q_; i++){
+      velocity_joint_handles_[i].setCommand(0.0);
+    }
+  }
+  
+  /*
   // collect the obstacle information. In this file, we make up our own obstacle information
   Eigen::VectorXd q = Eigen::VectorXd::Zero(dim_q_);
   std::vector<robot_env_evaluator::distanceResult> distances;
@@ -165,6 +253,12 @@ void APFJointVelocity::update(const ros::Time& /* time */,
   {
     std::lock_guard<std::mutex> lock(obstacles_mutex_);
     env_evaluator_ptr_->computeDistances(q, obstacles_, distances);
+    // obstacles_ is position of obstacles.
+
+    // [TODO] You don't need to use compute distances. you can get EE frame by using the
+    //  env_evaluator_ptr_ -> forwardKinematics(q, T);
+    //  and all the other frames (on body) by using the
+    //  --- TBD ---
   }
   env_evaluator_ptr_->InspectGeomModelAndData();
 
@@ -175,9 +269,15 @@ void APFJointVelocity::update(const ros::Time& /* time */,
   Eigen::MatrixXd J = Eigen::MatrixXd::Zero(6, dim_q_);
   env_evaluator_ptr_ -> forwardKinematics(q, T);
   env_evaluator_ptr_ -> jacobian(q, J);
+  //  You can get EE jacobian by using the
+  //  env_evaluator_ptr_ -> jacobian(q, T);
+  //  and all the other frames (on body) by using the
+  //  --- TBD ---
 
   Eigen::Vector3d now_ = T.block<3, 1>(0, 3);
-  Eigen::Vector3d goal_diff = targeted_velocity_;
+  Eigen::Vector3d goal_diff = targeted_velocity_; 
+  // this targeted_velocity_ is from multi agent. Just do an error (of *potential field*) here
+  // the rest is then doing pinv for you
   Eigen::Vector3d goal_diff_regularized = goal_diff;
   double vel = 0.05;
   if (goal_diff_regularized.norm() > (vel/0.5)){
@@ -186,7 +286,7 @@ void APFJointVelocity::update(const ros::Time& /* time */,
     goal_diff_regularized = goal_diff * 0.5;
   }
   Eigen::MatrixXd Jpos = J.block<3, 7>(0, 0);
-  q_dot_guide = Jpos.jacobiSvd(Eigen::ComputeThinU | Eigen::ComputeThinV).solve(goal_diff_regularized);
+  q_dot_guide = Jpos.jacobiSvd(Eigen::ComputeThinU | Eigen::ComputeThinV).solve(goal_diff_regularized); // pinv
   
   // publish and visualize the controller start and goal information
   #ifdef CONTROLLER_DEBUG
@@ -259,7 +359,7 @@ void APFJointVelocity::update(const ros::Time& /* time */,
   } while(false);
   #endif // CONTROLLER_DEBUG
 
-  // Calculate the controller cost input
+  // This you should not use, its fliqc
   FLIQC_controller_core::FLIQC_cost_input cost_input;
   cost_input.Q = Eigen::MatrixXd::Identity(dim_q_, dim_q_);
   cost_input.g = Eigen::VectorXd::Zero(dim_q_);
@@ -389,7 +489,7 @@ void APFJointVelocity::update(const ros::Time& /* time */,
     } while(false);
   #endif // CONTROLLER_DEBUG
 
-  // Get the obstacle distance information and convert it as the distance input for the controller
+  // This you should not use, its fliqc
   std::vector<FLIQC_controller_core::FLIQC_distance_input> distance_inputs;
   for (size_t i = 0; i < distances.size(); ++i){
     FLIQC_controller_core::FLIQC_distance_input distance_input;
@@ -415,7 +515,9 @@ void APFJointVelocity::update(const ros::Time& /* time */,
   // }
 
   // run the controller
+  // [TODO] implement nullspace projection here (After we have correct information)
   Eigen::VectorXd q_dot_command = controller_ptr_->runController(q_dot_guide, cost_input, distance_inputs);
+
   if (goal_diff.norm() >= 0.01) {
     for (size_t i = 0; i < 7; ++i) {
       velocity_joint_handles_[i].setCommand(q_dot_command(i));
@@ -426,6 +528,7 @@ void APFJointVelocity::update(const ros::Time& /* time */,
       velocity_joint_handles_[i].setCommand(0);
     }
   }
+    */
 }
 
 void APFJointVelocity::stopping(const ros::Time& /*time*/) {
