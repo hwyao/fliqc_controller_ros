@@ -93,13 +93,15 @@ bool APFJointVelocity::init(hardware_interface::RobotHW* robot_hardware, ros::No
 
   // Initialize the robot environment evaluator in robot_env_evaluator
   pinocchio::Model model;
-  std::string ee_name;
+  std::string ee_name_preset;
+  std::vector<std::string> joint_names_preset;
+  
   pinocchio::GeometryModel collision_model;
-  auto preset = robot_env_evaluator::RobotPresetFactory::createRobotPreset("FrankaEmika");
+  auto preset = robot_env_evaluator::RobotPresetFactory::createRobotPreset("panda");
   CHECK_NOT_EMPTY(controller_name, preset == nullptr);
-  preset->getPresetRobot(model, ee_name, collision_model);
+  preset->getPresetRobot(model, ee_name_preset, joint_names_preset, collision_model);
 
-  env_evaluator_ptr_ = std::make_unique<robot_env_evaluator::RobotEnvEvaluator>(model, ee_name, collision_model);
+  env_evaluator_ptr_ = std::make_unique<robot_env_evaluator::RobotEnvEvaluator>(model, ee_name_preset, joint_names_preset, collision_model);
 
   
   // subscribe to the targeted velocity and goal to distance from the multi-agent system
@@ -181,15 +183,15 @@ void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& p
   }
 
   //STEP 1 - use Haowen env_evaluator to calculate FK and jacobian 
-  Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
-  Eigen::MatrixXd J(6, dim_q_);
-  env_evaluator_ptr_->forwardKinematics(q, T);
-  env_evaluator_ptr_->jacobian(q, J);
+  Eigen::Matrix4d T_ee = Eigen::Matrix4d::Identity();
+  Eigen::MatrixXd J_full_ee(6, dim_q_);
+  env_evaluator_ptr_->forwardKinematics(q, T_ee); // default argument is -1 (EE)
+  env_evaluator_ptr_->jacobian(q, J_full_ee);
 
-
+  Eigen::MatrixXd J_ee = J_full_ee.block(0, 0, 3, dim_q_);
   //STEP 2 - calculate EE position and attractive force 
 
-  Eigen::Vector3d ee_pos = T.block<3,1>(0,3);
+  Eigen::Vector3d ee_pos = T_ee.block<3,1>(0,3);
 
   Eigen::Vector3d goal_pos;
   Eigen::Vector3d diff = goal_pos_ - ee_pos;
@@ -224,16 +226,64 @@ void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& p
     }
   }
 
-  Eigen::Vector3d combined_vel = attract + repulsive;
+  Eigen::Vector3d combined_vel_ee = attract + repulsive;
 
-  Eigen::MatrixXd Jpos = J.block(0,0, 3, dim_q_); // pinv 
-  Eigen::VectorXd qdot = Jpos.jacobiSvd(Eigen::ComputeThinU | Eigen::ComputeThinV).solve(combined_vel);
+// ------------------------------------EE main task -----------------------------------
+  Eigen::VectorXd dq_main = J_ee.jacobiSvd(Eigen::ComputeThinU | Eigen::ComputeThinV).solve(combined_vel_ee);
+
+  Eigen::MatrixXd J_ee_pinv = J_ee.jacobiSvd(Eigen::ComputeThinU|Eigen::ComputeThinV).solve(Eigen::MatrixXd::Identity(3,3));
+  Eigen::MatrixXd N_ee = Eigen::MatrixXd::Identity(dim_q_, dim_q_) - J_ee_pinv * J_ee;
+
+ // --------------------------------Joints minor Task ----------------------------------- 
+
+ //  Control site -> joint 3 
+  Eigen::Matrix4d T_j3 = Eigen::Matrix4d::Identity();
+  Eigen::MatrixXd J_full_j3(6, dim_q_);
+  env_evaluator_ptr_->forwardKinematics(q, T_j3, 3);
+  env_evaluator_ptr_->jacobian(q, J_full_j3, 3);
+
+  Eigen::MatrixXd J_j3 = J_full_j3.block(0,0, 3, dim_q_);
+  Eigen::Vector3d j3_pos = T_j3.block<3,1>(0,3);
+
+
+  // Joint 3 repulsive force from the obstacles
+
+  Eigen::Vector3d F_rep_j3(0,0,0);
+  {
+    std::lock_guard<std::mutex> lock(obstacles_mutex_);
+    for(const auto& obs : obstacles_)
+    {
+      Eigen::Vector3d obs_center = obs.obstacle_pose.block<3,1>(0,3);
+      //double r = obs.obstacle.radius;
+      double r = 0.05;
+      Eigen::Vector3d diff_j3 = j3_pos - obs_center;
+      double dist = diff_j3.norm();
+      double real_d = dist - r;
+      double d_thresh = 0.2; 
+
+      if(real_d < d_thresh && real_d>1e-5)
+      {
+        double k_rep = 1.0; 
+        double rep_val = k_rep * (1.0/real_d - 1.0/d_thresh)/(real_d*real_d);
+        F_rep_j3 += rep_val*(diff_j3/dist);
+      }
+    }
+  }
+
+  // Joint 3 pinv
+  Eigen::MatrixXd J_j3_pinv = J_j3.jacobiSvd(Eigen::ComputeThinU|Eigen::ComputeThinV).solve(Eigen::MatrixXd::Identity(3,3));
+
+  Eigen::VectorXd dq_j3 = N_ee * (J_j3_pinv * F_rep_j3);
+
+  //STEP 4 - calculate the joint velocity command
+  // --------------------------------main task + minor task -----------------------------------
+  Eigen::VectorXd dq = dq_main + dq_j3;
 
   if(distance_to_goal_ > 0.01)
   {
     for(int i=0; i<dim_q_; i++)
     {
-      velocity_joint_handles_[i].setCommand(qdot(i));
+      velocity_joint_handles_[i].setCommand(dq(i));
     }
   } else 
   {
