@@ -90,13 +90,14 @@ bool FLIQCJointVelocityStandard::init(hardware_interface::RobotHW* robot_hardwar
 
   // Initialize the robot environment evaluator in robot_env_evaluator
   pinocchio::Model model;
-  std::string ee_name;
+  std::string ee_name_preset;
+  std::vector<std::string> joint_names_preset;
   pinocchio::GeometryModel collision_model;
-  auto preset = robot_env_evaluator::RobotPresetFactory::createRobotPreset("FrankaEmika");
+  auto preset = robot_env_evaluator::RobotPresetFactory::createRobotPreset("panda");
   CHECK_NOT_EMPTY(controller_name, preset == nullptr);
-  preset->getPresetRobot(model, ee_name, collision_model);
+  preset->getPresetRobot(model, ee_name_preset, joint_names_preset, collision_model);
 
-  env_evaluator_ptr_ = std::make_unique<robot_env_evaluator::RobotEnvEvaluator>(model, ee_name, collision_model);
+  env_evaluator_ptr_ = std::make_unique<robot_env_evaluator::RobotEnvEvaluator>(model, ee_name_preset, joint_names_preset, collision_model);
 
   
   // subscribe to the targeted velocity and goal to distance from the multi-agent system
