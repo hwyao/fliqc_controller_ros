@@ -178,8 +178,13 @@ void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& p
   //STEP 0 - get current joint position and velocity
 
   Eigen::VectorXd q(dim_q_);
-  for (size_t i = 0; i < dim_q_; i++) {
+  Eigen::VectorXd qdot_joint(dim_q_);
+
+  for (size_t i = 0; i < dim_q_; i++) 
+  {
     q(i) = velocity_joint_handles_[i].getPosition();
+    qdot_joint(i) = velocity_joint_handles_[i].getVelocity();
+    
   }
 
   //STEP 1 - use Haowen env_evaluator to calculate FK and jacobian 
@@ -189,23 +194,35 @@ void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& p
   env_evaluator_ptr_->jacobian(q, J_full_ee);
 
   Eigen::MatrixXd J_ee = J_full_ee.block(0, 0, 3, dim_q_);
-  //STEP 2 - calculate EE position and attractive force 
 
+  //STEP 2 - calculate EE position and attractive force (traslational attract)
+  //the one that from the papar 
+  // ---------------------Translational Attractive Force--------------------------
   Eigen::Vector3d ee_pos = T_ee.block<3,1>(0,3);
-
-  Eigen::Vector3d goal_pos;
   Eigen::Vector3d diff = goal_pos_ - ee_pos;
-  double k_att = 2.0; 
+  ROS_INFO_STREAM("EE pos: " << ee_pos.transpose() << " goal pos: " << goal_pos_.transpose());
 
-  Eigen::Vector3d attract = k_att * diff; 
+  double kp = 2.0;
+  double kv = 2.0;
+  double Vmax = 0.1; 
+  Eigen::Vector3d xdot_d = (kp / kv) * diff;
+  Eigen::Vector3d xdot = J_ee * qdot_joint;
 
-  double max_speed = 0.1;
-  if(attract.norm() > max_speed){
-    attract = attract.normalized() * max_speed;
-  }
+  double nu = std ::min(1.0, Vmax / (std::sqrt(xdot_d.transpose() * xdot_d) + 1e-6));
+  Eigen::Vector3d attract = -kv * (xdot - nu * xdot_d);
+  // simple realization of attraction force
+  // double k_att = 2.0; 
+
+  // Eigen::Vector3d attract = k_att * diff; 
+
+  // double max_speed = 0.1;
+  // if(attract.norm() > max_speed){
+  //   attract = attract.normalized() * max_speed;
+  // }
+
 
   //STEP 3 - calculate the repulsive force from the obstacles
-
+  //--------------------------------Repulsive Force--------------------------
   Eigen::Vector3d repulsive(0,0,0);
   {
     std::lock_guard<std::mutex> lock(obstacles_mutex_);
@@ -225,6 +242,31 @@ void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& p
       }
     }
   }
+  //---------------------Rotational Attractive Force--------------------------
+  Eigen::Matrix3d R_ee = T_ee.block<3,3>(0,0);
+  Eigen::Quaterniond q_curr(R_ee);
+  // To do : get it from topic
+  //Eigen::Quaterniond q_goal(0.96593, 0.25882, 0.0, 0.0);
+
+  Eigen::Quaterniond q_goal(1, 0.0, 0.0, 0.0);
+
+
+  double p0 = q_curr.w();
+  Eigen::Vector3d pim = q_curr.vec();
+  double pg0 = q_goal.w();
+  Eigen::Vector3d pgim = q_goal.vec();
+
+  Eigen::Vector3d orientation_error = p0 * pgim - pg0 * pim - pim.cross(pgim);
+
+  double k_att_r = 2.0; // orientation position gain
+  double k_vel_r = 1.0; // orientation velocity gain
+  double w_max = 0.5;   // max angular velocity
+
+  Eigen::Vector3d w_d = (k_att_r / k_vel_r) * orientation_error;
+  double nu_r = std::min(1.0, w_max / (w_d.norm() + 1e-6)); 
+  Eigen::Vector3d f_vlcr = k_vel_r * nu_r * w_d; // rotational attraction
+  Eigen::VectorXd dq_ori = J_full_ee.block(3, 0, 3, dim_q_).transpose() * f_vlcr;
+
 
   Eigen::Vector3d combined_vel_ee = attract + repulsive;
 
@@ -270,6 +312,7 @@ void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& p
     }
   }
 
+
   // Joint 3 pinv
   Eigen::MatrixXd J_j3_pinv = J_j3.jacobiSvd(Eigen::ComputeThinU|Eigen::ComputeThinV).solve(Eigen::MatrixXd::Identity(3,3));
 
@@ -277,7 +320,7 @@ void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& p
 
   //STEP 4 - calculate the joint velocity command
   // --------------------------------main task + minor task -----------------------------------
-  Eigen::VectorXd dq = dq_main + dq_j3;
+  Eigen::VectorXd dq = dq_main + dq_j3 + dq_ori;
 
   if(distance_to_goal_ > 0.01)
   {
@@ -293,292 +336,6 @@ void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& p
     }
   }
   
-  /*
-  // collect the obstacle information. In this file, we make up our own obstacle information
-  Eigen::VectorXd q = Eigen::VectorXd::Zero(dim_q_);
-  std::vector<robot_env_evaluator::distanceResult> distances;
-  for (size_t i = 0; i < dim_q_; ++i) {
-    q(i) = velocity_joint_handles_[i].getPosition();
-  }
-  {
-    std::lock_guard<std::mutex> lock(obstacles_mutex_);
-    env_evaluator_ptr_->computeDistances(q, obstacles_, distances);
-    // obstacles_ is position of obstacles.
-
-    // [TODO] You don't need to use compute distances. you can get EE frame by using the
-    //  env_evaluator_ptr_ -> forwardKinematics(q, T);
-    //  and all the other frames (on body) by using the
-    //  --- TBD ---
-  }
-  env_evaluator_ptr_->InspectGeomModelAndData();
-
-  // Calculate the targeted velocity goal
-  Eigen::VectorXd q_dot_guide(dim_q_);
-  
-  Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
-  Eigen::MatrixXd J = Eigen::MatrixXd::Zero(6, dim_q_);
-  env_evaluator_ptr_ -> forwardKinematics(q, T);
-  env_evaluator_ptr_ -> jacobian(q, J);
-  //  You can get EE jacobian by using the
-  //  env_evaluator_ptr_ -> jacobian(q, T);
-  //  and all the other frames (on body) by using the
-  //  --- TBD ---
-
-  Eigen::Vector3d now_ = T.block<3, 1>(0, 3);
-  Eigen::Vector3d goal_diff = targeted_velocity_; 
-  // this targeted_velocity_ is from multi agent. Just do an error (of *potential field*) here
-  // the rest is then doing pinv for you
-  Eigen::Vector3d goal_diff_regularized = goal_diff;
-  double vel = 0.05;
-  if (goal_diff_regularized.norm() > (vel/0.5)){
-    goal_diff_regularized = goal_diff_regularized.normalized() * 0.05;
-  } else {
-    goal_diff_regularized = goal_diff * 0.5;
-  }
-  Eigen::MatrixXd Jpos = J.block<3, 7>(0, 0);
-  q_dot_guide = Jpos.jacobiSvd(Eigen::ComputeThinU | Eigen::ComputeThinV).solve(goal_diff_regularized); // pinv
-  
-  // publish and visualize the controller start and goal information
-  #ifdef CONTROLLER_DEBUG
-  do{
-    static ros::NodeHandle node_handle;
-    static ros::Time last_publish_time = ros::Time::now();
-    if (ros::Time::now() - last_publish_time > ros::Duration(1.0/30)){
-      last_publish_time = ros::Time::now();
-      static ros::Publisher obs_pub;
-      if (!obs_pub){
-        obs_pub = node_handle.advertise<visualization_msgs::MarkerArray>("obstacles", 1);
-      }
-      visualization_msgs::MarkerArray obs_marker_array;
-      geometry_msgs::Point point_helper;
-        // The current EE position
-        visualization_msgs::Marker diff_arrow;
-        diff_arrow.header.frame_id = "panda_link0";
-        diff_arrow.header.stamp = ros::Time::now(); 
-        diff_arrow.ns = "controller_info";
-        diff_arrow.id = 1;
-        diff_arrow.type = visualization_msgs::Marker::ARROW;
-        diff_arrow.action = visualization_msgs::Marker::ADD;
-        point_helper.x = now_(0);
-        point_helper.y = now_(1);
-        point_helper.z = now_(2);
-        diff_arrow.points.push_back(point_helper);
-        Eigen::Vector3d goal_diff_regularized_after = now_ + goal_diff_regularized;
-        point_helper.x = goal_diff_regularized_after(0);
-        point_helper.y = goal_diff_regularized_after(1);
-        point_helper.z = goal_diff_regularized_after(2);
-        diff_arrow.points.push_back(point_helper);
-        diff_arrow.pose.orientation.w = 1.0;
-        diff_arrow.scale.x = 0.005;
-        diff_arrow.scale.y = 0.01;
-        diff_arrow.scale.z = 0.01;
-        diff_arrow.color.a = 0.6;
-        diff_arrow.color.r = 0.0;
-        diff_arrow.color.g = 1.0;
-        diff_arrow.color.b = 0.0;
-        obs_marker_array.markers.push_back(diff_arrow);
-
-        // The velocity guide vector
-        visualization_msgs::Marker q_dot_guide_marker;
-        q_dot_guide_marker.header.frame_id = "panda_link0";
-        q_dot_guide_marker.header.stamp = ros::Time::now();
-        q_dot_guide_marker.ns = "controller_info";
-        q_dot_guide_marker.id = 2;
-        q_dot_guide_marker.type = visualization_msgs::Marker::ARROW;
-        q_dot_guide_marker.action = visualization_msgs::Marker::ADD;
-        point_helper.x = now_(0);
-        point_helper.y = now_(1);
-        point_helper.z = now_(2);
-        q_dot_guide_marker.points.push_back(point_helper);
-        Eigen::Vector3d q_dot_guide_vel = now_ + Jpos * q_dot_guide;
-        point_helper.x = q_dot_guide_vel(0);
-        point_helper.y = q_dot_guide_vel(1);
-        point_helper.z = q_dot_guide_vel(2);
-        q_dot_guide_marker.points.push_back(point_helper);
-        q_dot_guide_marker.pose.orientation.w = 1.0;
-        q_dot_guide_marker.scale.x = 0.005;
-        q_dot_guide_marker.scale.y = 0.01;
-        q_dot_guide_marker.scale.z = 0.01;
-        q_dot_guide_marker.color.a = 0.6;
-        q_dot_guide_marker.color.r = 0.0;
-        q_dot_guide_marker.color.g = 0.0;
-        q_dot_guide_marker.color.b = 1.0;
-        obs_marker_array.markers.push_back(q_dot_guide_marker);
-      obs_pub.publish(obs_marker_array);
-    }
-  } while(false);
-  #endif // CONTROLLER_DEBUG
-
-  // This you should not use, its fliqc
-  FLIQC_controller_core::FLIQC_cost_input cost_input;
-  cost_input.Q = Eigen::MatrixXd::Identity(dim_q_, dim_q_);
-  cost_input.g = Eigen::VectorXd::Zero(dim_q_);
-
-  // //distances
-  // for (size_t i = 0; i < distances.size(); i++){
-  //   ROS_INFO_STREAM("[STEP1]APFJointVelocity: Distance " << i << " is "
-  //       << distances[i].distance << " with projector " << std::endl 
-  //       << distances[i].projector_jointspace_to_dist.transpose());
-  // }
-  
-  // publish and visualize the world enviroment calculation information
-  #ifdef CONTROLLER_DEBUG
-    do{
-      static ros::NodeHandle node_handle;
-      static ros::Time last_publish_time = ros::Time::now();
-      if (ros::Time::now() - last_publish_time > ros::Duration(1.0/30)){
-        last_publish_time = ros::Time::now();
-        static ros::Publisher obs_pub;
-        if (!obs_pub){
-          obs_pub = node_handle.advertise<visualization_msgs::MarkerArray>("obstacles", 1);
-        }
-        visualization_msgs::MarkerArray obs_marker_array;
-        geometry_msgs::Point point_helper;
-        for (size_t i = 0; i < distances.size(); ++i){
-          // nearest point on object
-          visualization_msgs::Marker nearest_point_marker;
-          nearest_point_marker.header.frame_id = "panda_link0";
-          nearest_point_marker.header.stamp = ros::Time::now();
-          nearest_point_marker.ns = "env_info_obs";
-          nearest_point_marker.id = i;
-          nearest_point_marker.type = visualization_msgs::Marker::SPHERE;
-          nearest_point_marker.action = visualization_msgs::Marker::ADD;
-          nearest_point_marker.pose.position.x = distances[i].nearest_point_on_object(0);
-          nearest_point_marker.pose.position.y = distances[i].nearest_point_on_object(1);
-          nearest_point_marker.pose.position.z = distances[i].nearest_point_on_object(2);
-          nearest_point_marker.pose.orientation.w = 1.0;
-          nearest_point_marker.scale.x = 0.0075;
-          nearest_point_marker.scale.y = 0.0075;
-          nearest_point_marker.scale.z = 0.0075;
-          nearest_point_marker.color.a = 1.0; 
-          nearest_point_marker.color.r = 0.0;
-          nearest_point_marker.color.g = 1.0;
-          nearest_point_marker.color.b = 0.0;
-          obs_marker_array.markers.push_back(nearest_point_marker);
-
-          // nearest point on robot
-          nearest_point_marker.ns = "env_info_rbt";
-          nearest_point_marker.pose.position.x = distances[i].nearest_point_on_robot(0);
-          nearest_point_marker.pose.position.y = distances[i].nearest_point_on_robot(1);
-          nearest_point_marker.pose.position.z = distances[i].nearest_point_on_robot(2);
-          obs_marker_array.markers.push_back(nearest_point_marker);
-
-          // line connecting two points
-          visualization_msgs::Marker connection_line;
-          connection_line.header.frame_id = "panda_link0";
-          connection_line.header.stamp = ros::Time::now();
-          connection_line.ns = "env_info_connection";
-          connection_line.id = i;
-          connection_line.type = visualization_msgs::Marker::LINE_LIST;
-          connection_line.action = visualization_msgs::Marker::ADD;
-          point_helper.x = distances[i].nearest_point_on_robot(0);
-          point_helper.y = distances[i].nearest_point_on_robot(1);
-          point_helper.z = distances[i].nearest_point_on_robot(2);
-          connection_line.points.push_back(point_helper);
-          point_helper.x = distances[i].nearest_point_on_object(0);
-          point_helper.y = distances[i].nearest_point_on_object(1);
-          point_helper.z = distances[i].nearest_point_on_object(2);
-          connection_line.points.push_back(point_helper);
-          connection_line.pose.orientation.w = 1.0;
-          connection_line.scale.x = 0.0025;
-          connection_line.color.a = 0.6;
-          if (distances[i].distance > controller_ptr_->active_threshold){
-            connection_line.color.r = 0.0;
-            connection_line.color.g = 0.1;
-            connection_line.color.b = 0.0;
-          } else if (distances[i].distance > controller_ptr_->eps) {
-            connection_line.color.r = 1.0;
-            connection_line.color.g = 1.0;
-            connection_line.color.b = 0.0;
-          } else {
-            connection_line.color.r = 1.0;
-            connection_line.color.g = 0.0;
-            connection_line.color.b = 0.0;
-          }
-          obs_marker_array.markers.push_back(connection_line);
-
-          // normal vector to avoid the obstacle
-          visualization_msgs::Marker normal_vector_marker;
-          normal_vector_marker.header.frame_id = "panda_link0";
-          normal_vector_marker.header.stamp = ros::Time::now();
-          normal_vector_marker.ns = "env_info_normal";
-          normal_vector_marker.id = i;
-          normal_vector_marker.type = visualization_msgs::Marker::ARROW;
-          normal_vector_marker.action = visualization_msgs::Marker::ADD;
-          point_helper.x = distances[i].nearest_point_on_robot(0);
-          point_helper.y = distances[i].nearest_point_on_robot(1);
-          point_helper.z = distances[i].nearest_point_on_robot(2);
-          normal_vector_marker.points.push_back(point_helper);
-          Eigen::Vector3d normal_vector_end = distances[i].nearest_point_on_robot + distances[i].normal_vector * 0.1;
-          point_helper.x = normal_vector_end(0);
-          point_helper.y = normal_vector_end(1);
-          point_helper.z = normal_vector_end(2);
-          normal_vector_marker.points.push_back(point_helper);
-          normal_vector_marker.pose.orientation.w = 1.0;
-          normal_vector_marker.scale.x = 0.005;
-          normal_vector_marker.scale.y = 0.01;
-          normal_vector_marker.scale.z = 0.01;
-          normal_vector_marker.color.a = 0.6;
-          if (distances[i].distance > controller_ptr_->active_threshold){
-            normal_vector_marker.color.r = 0.0;
-            normal_vector_marker.color.g = 0.1;
-            normal_vector_marker.color.b = 0.0;
-          } else if (distances[i].distance > controller_ptr_->eps) {
-            normal_vector_marker.color.r = 1.0;
-            normal_vector_marker.color.g = 1.0;
-            normal_vector_marker.color.b = 0.0;
-          } else {
-            normal_vector_marker.color.r = 1.0;
-            normal_vector_marker.color.g = 0.0;
-            normal_vector_marker.color.b = 0.0;
-          }
-          obs_marker_array.markers.push_back(normal_vector_marker);
-        }
-        obs_pub.publish(obs_marker_array);
-      }
-    } while(false);
-  #endif // CONTROLLER_DEBUG
-
-  // This you should not use, its fliqc
-  std::vector<FLIQC_controller_core::FLIQC_distance_input> distance_inputs;
-  for (size_t i = 0; i < distances.size(); ++i){
-    FLIQC_controller_core::FLIQC_distance_input distance_input;
-    distance_input.id = i;
-    distance_input.distance = distances[i].distance;
-    distance_input.projector_control_to_dist = distances[i].projector_jointspace_to_dist.transpose();
-    distance_inputs.push_back(distance_input);
-  }
-
-  // //debug: distance_inputs
-  // for (size_t i = 0; i < distance_inputs.size(); ++i){
-  //   ROS_INFO_STREAM("[STEP2]APFJointVelocity: Distance " << i << " is " 
-  //       << distance_inputs[i].distance << " with projector " << std::endl << distance_inputs[i].projector_control_to_dist);
-  // }
-
-  //debug: distance_inputs activated
-  // for (size_t i = 0; i < distance_inputs.size(); ++i){
-  //   if (distance_inputs[i].distance < controller_ptr_->active_threshold){
-      
-  //     ROS_INFO_STREAM("[STEP2_COND]APFJointVelocity: Distance " << i << " is " 
-  //         << distance_inputs[i].distance << " with projector " << std::endl << distance_inputs[i].projector_control_to_dist);
-  //   }
-  // }
-
-  // run the controller
-  // [TODO] implement nullspace projection here (After we have correct information)
-  Eigen::VectorXd q_dot_command = controller_ptr_->runController(q_dot_guide, cost_input, distance_inputs);
-
-  if (goal_diff.norm() >= 0.01) {
-    for (size_t i = 0; i < 7; ++i) {
-      velocity_joint_handles_[i].setCommand(q_dot_command(i));
-    }
-  }else{
-    ROS_INFO_ONCE("LCQPControllerFrankaModel: Goal reached with tolerance %f", goal_diff.norm());
-    for (size_t i = 0; i < 7; ++i) {
-      velocity_joint_handles_[i].setCommand(0);
-    }
-  }
-    */
 }
 
 void APFJointVelocity::stopping(const ros::Time& /*time*/) {
