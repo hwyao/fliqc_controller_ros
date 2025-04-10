@@ -10,8 +10,13 @@
 #include <cmath>
 #include <array>
 #include <mutex>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <chrono>
 
 #include <ros/ros.h>
+#include <ros/package.h>
 #include <pluginlib/class_list_macros.h>
 #include <controller_interface/controller_base.h>
 #include <hardware_interface/hardware_interface.h>
@@ -25,11 +30,11 @@
 
 namespace fliqc_controller_ros {
 
+// Set the variables for this controller
+std::string controller_name = "FLIQCJointVelocityStandard";
+
 bool FLIQCJointVelocityStandard::init(hardware_interface::RobotHW* robot_hardware,
                                                    ros::NodeHandle& node_handle) {
-  // Set the variables for this controller
-  std::string controller_name = "FLIQCJointVelocityStandard";
-                                            
   // Get robot arm id, joint names and EE names parameters
   std::string arm_id;
   READ_PARAM(node_handle, controller_name, "arm_id", arm_id);
@@ -99,21 +104,29 @@ bool FLIQCJointVelocityStandard::init(hardware_interface::RobotHW* robot_hardwar
 
   env_evaluator_ptr_ = std::make_unique<robot_env_evaluator::RobotEnvEvaluator>(model, ee_name_preset, joint_names_preset, collision_model);
 
-  
   // subscribe to the targeted velocity and goal to distance from the multi-agent system
   targeted_velocity_sub_ = node_handle.subscribe("/agent_twist_global", 1, &FLIQCJointVelocityStandard::targetedVelocityCallback, this);
   dist_to_goal_sub_ = node_handle.subscribe("/distance_to_goal", 1, &FLIQCJointVelocityStandard::distanceToGoalCallback, this);
 
   // subscribe to the planning scene information and wait for the first received message
   planning_scene_sub_ = node_handle.subscribe("/planning_scene", 1, &FLIQCJointVelocityStandard::planningSceneCallback, this);
-  
+
+  // clear and warm up the data until the controller started
+  ROS_INFO_STREAM(controller_name << ": Controller starting...");
+  error_flag_ = false;
+  targeted_velocity_ = Eigen::Vector3d::Zero();
+  distance_to_goal_ = 100.0;
+  first_receive_obstacle_ = false;
+  obstacles_.clear();
+
   // wait until first message received from all subscribers
   ros::Rate rate(10);
-  while (ros::ok() && (obstacles_.empty() || targeted_velocity_ == Eigen::Vector3d(-100,-100,-100) || distance_to_goal_ == -100)) {
+  while (ros::ok() && (!first_receive_obstacle_)) {
+      ROS_INFO_STREAM_THROTTLE(1, controller_name << ": Waiting for scene messages...");
       ros::spinOnce();
-      ROS_INFO_STREAM_THROTTLE(1, controller_name << ": Waiting for first of all messages...");
       rate.sleep();
   }
+  ROS_INFO_STREAM(controller_name << ": Controller started.");
 
   return true;
 }
@@ -143,6 +156,8 @@ void FLIQCJointVelocityStandard::planningSceneCallback(const moveit_msgs::Planni
         ROS_ERROR_STREAM("The obstacle type " << obj.primitives[0].type << "of object " << obj.id << " is not supported.");
       }
   }
+
+  if(first_receive_obstacle_ == false){ first_receive_obstacle_ = true; }
 }
 
 void FLIQCJointVelocityStandard::targetedVelocityCallback(const geometry_msgs::TwistStamped::ConstPtr& msg) {
@@ -198,7 +213,7 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
       last_publish_time = ros::Time::now();
       static ros::Publisher obs_pub;
       if (!obs_pub){
-        obs_pub = node_handle.advertise<visualization_msgs::MarkerArray>("obstacles", 1);
+        obs_pub = node_handle.advertise<visualization_msgs::MarkerArray>("obstacles", 10);
       }
       visualization_msgs::MarkerArray obs_marker_array;
       geometry_msgs::Point point_helper;
@@ -281,7 +296,7 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
         last_publish_time = ros::Time::now();
         static ros::Publisher obs_pub;
         if (!obs_pub){
-          obs_pub = node_handle.advertise<visualization_msgs::MarkerArray>("obstacles", 1);
+          obs_pub = node_handle.advertise<visualization_msgs::MarkerArray>("obstacles", 10);
         }
         visualization_msgs::MarkerArray obs_marker_array;
         geometry_msgs::Point point_helper;
@@ -414,18 +429,79 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
   //         << distance_inputs[i].distance << " with projector " << std::endl << distance_inputs[i].projector_control_to_dist);
   //   }
   // }
+  Eigen::VectorXd q_dot_command;
 
   // run the controller
-  Eigen::VectorXd q_dot_command = controller_ptr_->runController(q_dot_guide, cost_input, distance_inputs);
-  if (goal_diff.norm() >= 0.01) {
+  try {
+    q_dot_command = controller_ptr_->runController(q_dot_guide, cost_input, distance_inputs);
+
+  } catch (const FLIQC_controller_core::LCQPowException& e) {
+    ROS_ERROR_STREAM_ONCE(controller_name << ": LCQPowException caught during runController:\n" << e.what());
+
+    try {
+      // Get the root path of the package using rospack
+      std::string package_path = ros::package::getPath("fliqc_controller_ros");
+      if (package_path.empty()) {
+        ROS_ERROR_STREAM("Failed to find package path for fliqc_controller_ros.");
+        throw std::runtime_error("Package path not found.");
+      }
+
+      // Create the log directory
+      std::string log_dir = package_path + "/log";
+      std::filesystem::create_directories(log_dir);
+
+      // Create a subdirectory with the current time
+      auto now = std::chrono::system_clock::now();
+      auto time_t_now = std::chrono::system_clock::to_time_t(now);
+      std::ostringstream time_stream;
+      time_stream << std::put_time(std::localtime(&time_t_now), "%Y-%m-%d_%H-%M-%S-%Z");
+      std::string time_dir = log_dir + "/" + time_stream.str();
+      std::filesystem::create_directories(time_dir);
+
+      // Write exception data to a file
+      std::string log_file = time_dir + "/exception_log.txt";
+      std::ofstream file(log_file);
+      if (file.is_open()) {
+        file << "LCQPowException caught:\n";
+        file << "Message: " << e.what() << "\n";
+        file << "Input Q:\n" << e.input.Q << "\n";
+        file << "Input g:\n" << e.input.g.transpose() << "\n";
+        file << "Output x:\n" << e.output.x.transpose() << "\n";
+        file << "Output y:\n" << e.output.y.transpose() << "\n";
+        file << "Debug options:\n";
+        file << "  complementarityTolerance: " << e.debug.options.complementarityTolerance << "\n";
+        file << "  stationarityTolerance: " << e.debug.options.stationarityTolerance << "\n";
+        file << "  initialPenaltyParameter: " << e.debug.options.initialPenaltyParameter << "\n";
+        file << "  penaltyUpdateFactor: " << e.debug.options.penaltyUpdateFactor << "\n";
+        file.close();
+      } else {
+        ROS_ERROR_STREAM("Failed to open log file: " << log_file);
+      }
+    } catch (const std::exception& ex) {
+      ROS_ERROR_STREAM("Failed to save exception to log: " << ex.what());
+    }
+
+    error_flag_ = true;
+  } catch (const std::exception& e) {
+    ROS_ERROR_STREAM_ONCE(controller_name << ": std::exception caught during runController:\n" << e.what());
+    error_flag_ = true;
+  } catch (...) {
+    ROS_ERROR_STREAM_ONCE(controller_name << ": Unknown exception caught during runController.");
+    error_flag_ = true;
+  }
+
+  if (!error_flag_) {
     for (size_t i = 0; i < 7; ++i) {
       velocity_joint_handles_[i].setCommand(q_dot_command(i));
     }
-  }else{
-    ROS_INFO_ONCE("LCQPControllerFrankaModel: Goal reached with tolerance %f", goal_diff.norm());
+    if (goal_diff.norm() <= 0.005) {
+      ROS_INFO_STREAM_THROTTLE(1, controller_name << ": Goal reached with tolerance " << goal_diff.norm());
+    }
+  } else {
     for (size_t i = 0; i < 7; ++i) {
       velocity_joint_handles_[i].setCommand(0);
     }
+    ROS_WARN_STREAM_THROTTLE(3, controller_name << ": Error in controller, stopping the robot.");
   }
 }
 
