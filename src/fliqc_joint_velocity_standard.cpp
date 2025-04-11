@@ -446,7 +446,7 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
         throw std::runtime_error("Package path not found.");
       }
 
-      // Create the log directory
+      // Create the log directory if it doesn't exist
       std::string log_dir = package_path + "/log";
       std::filesystem::create_directories(log_dir);
 
@@ -455,28 +455,12 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
       auto time_t_now = std::chrono::system_clock::to_time_t(now);
       std::ostringstream time_stream;
       time_stream << std::put_time(std::localtime(&time_t_now), "%Y-%m-%d_%H-%M-%S-%Z");
-      std::string time_dir = log_dir + "/" + time_stream.str();
-      std::filesystem::create_directories(time_dir);
+      std::string base_dir = log_dir + "/" + time_stream.str() + "_" + controller_name;
+      std::filesystem::create_directories(base_dir);
 
-      // Write exception data to a file
-      std::string log_file = time_dir + "/exception_log.txt";
-      std::ofstream file(log_file);
-      if (file.is_open()) {
-        file << "LCQPowException caught:\n";
-        file << "Message: " << e.what() << "\n";
-        file << "Input Q:\n" << e.input.Q << "\n";
-        file << "Input g:\n" << e.input.g.transpose() << "\n";
-        file << "Output x:\n" << e.output.x.transpose() << "\n";
-        file << "Output y:\n" << e.output.y.transpose() << "\n";
-        file << "Debug options:\n";
-        file << "  complementarityTolerance: " << e.debug.options.complementarityTolerance << "\n";
-        file << "  stationarityTolerance: " << e.debug.options.stationarityTolerance << "\n";
-        file << "  initialPenaltyParameter: " << e.debug.options.initialPenaltyParameter << "\n";
-        file << "  penaltyUpdateFactor: " << e.debug.options.penaltyUpdateFactor << "\n";
-        file.close();
-      } else {
-        ROS_ERROR_STREAM("Failed to open log file: " << log_file);
-      }
+      // Create subdirectories for different types of logs
+      FLIQC_controller_core::logLCQPowExceptionAsFile(e, base_dir);
+
     } catch (const std::exception& ex) {
       ROS_ERROR_STREAM("Failed to save exception to log: " << ex.what());
     }
