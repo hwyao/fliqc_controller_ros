@@ -31,7 +31,7 @@
 namespace fliqc_controller_ros {
 
 // Set the variables for this controller
-std::string controller_name = "FLIQCJointVelocityStandard";
+static std::string controller_name = "FLIQCJointVelocityStandard";
 
 bool FLIQCJointVelocityStandard::init(hardware_interface::RobotHW* robot_hardware,
                                                    ros::NodeHandle& node_handle) {
@@ -213,7 +213,7 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
       last_publish_time = ros::Time::now();
       static ros::Publisher obs_pub;
       if (!obs_pub){
-        obs_pub = node_handle.advertise<visualization_msgs::MarkerArray>("obstacles", 10);
+        obs_pub = node_handle.advertise<visualization_msgs::MarkerArray>("controller_info", 10);
       }
       visualization_msgs::MarkerArray obs_marker_array;
       geometry_msgs::Point point_helper;
@@ -296,7 +296,7 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
         last_publish_time = ros::Time::now();
         static ros::Publisher obs_pub;
         if (!obs_pub){
-          obs_pub = node_handle.advertise<visualization_msgs::MarkerArray>("obstacles", 10);
+          obs_pub = node_handle.advertise<visualization_msgs::MarkerArray>("environment_result", 10);
         }
         visualization_msgs::MarkerArray obs_marker_array;
         geometry_msgs::Point point_helper;
@@ -432,10 +432,12 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
   Eigen::VectorXd q_dot_command;
 
   // run the controller
+  if (!error_flag_){
   try {
     q_dot_command = controller_ptr_->runController(q_dot_guide, cost_input, distance_inputs);
 
   } catch (const FLIQC_controller_core::LCQPowException& e) {
+      error_flag_ = true;
     ROS_ERROR_STREAM_ONCE(controller_name << ": LCQPowException caught during runController:\n" << e.what());
 
     try {
@@ -465,13 +467,16 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
       ROS_ERROR_STREAM("Failed to save exception to log: " << ex.what());
     }
 
+      throw std::runtime_error("LCQPowException caught during runController.");
+    } catch (const std::exception& e) {
     error_flag_ = true;
-  } catch (const std::exception& e) {
     ROS_ERROR_STREAM_ONCE(controller_name << ": std::exception caught during runController:\n" << e.what());
+      throw std::runtime_error("std::exception caught during runController.");
+    } catch (...) {
     error_flag_ = true;
-  } catch (...) {
     ROS_ERROR_STREAM_ONCE(controller_name << ": Unknown exception caught during runController.");
-    error_flag_ = true;
+      throw std::runtime_error("Unknown exception caught during runController.");
+    }
   }
 
   if (!error_flag_) {
@@ -485,7 +490,7 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
     for (size_t i = 0; i < 7; ++i) {
       velocity_joint_handles_[i].setCommand(0);
     }
-    ROS_WARN_STREAM_THROTTLE(3, controller_name << ": Error in controller, stopping the robot.");
+    ROS_WARN_STREAM_THROTTLE(1, controller_name << ": Error in the controller. Stopping the robot.");
   }
 }
 

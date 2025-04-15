@@ -34,6 +34,9 @@ class FLIQCJointVelocityNoEnvNode : public controller_interface::MultiInterfaceC
   // simulated obstacle list
   std::vector<Eigen::Vector3d> obsList_;   
   std::vector<double> obsRadiusList_; 
+
+  // error flag
+  bool error_flag_ = false;
 };
 
 }  // namespace fliqc_controller_ros

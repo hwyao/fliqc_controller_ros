@@ -2,19 +2,24 @@
 #include <pinocchio/parsers/srdf.hpp>
 #include <pinocchio/algorithm/model.hpp>
 
-#include <fliqc_controller_ros/fliqc_joint_velocity_no_env_node.hpp>
-#include <fliqc_controller_ros/helpers.hpp>
-#include "robot_env_evaluator/robot_env_evaluator_path.h"
-#include "robot_env_evaluator/robot_presets.hpp"
+#include "fliqc_controller_ros/fliqc_joint_velocity_no_env_node.hpp"
+#include "fliqc_controller_ros/helpers.hpp"
+#include <robot_env_evaluator/robot_env_evaluator_path.h>
+#include <robot_env_evaluator/robot_presets.hpp>
 
 #include <cmath>
 #include <array>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <chrono>
 
+#include <ros/ros.h>
+#include <ros/package.h>
 #include <controller_interface/controller_base.h>
 #include <hardware_interface/hardware_interface.h>
 #include <hardware_interface/joint_command_interface.h>
 #include <pluginlib/class_list_macros.h>
-#include <ros/ros.h>
 
 #ifdef CONTROLLER_DEBUG
 #include <visualization_msgs/MarkerArray.h>
@@ -24,10 +29,12 @@
 
 namespace fliqc_controller_ros {
 
+// Set the variables for this controller
+static std::string controller_name = "FLIQCJointVelocityNoEnvNode";
+
 bool FLIQCJointVelocityNoEnvNode::init(hardware_interface::RobotHW* robot_hardware,
                                                    ros::NodeHandle& node_handle) {
   // Set the variables for this controller
-  std::string controller_name = "FLIQCJointVelocityNoEnvNode";
                                             
   // Get robot arm id, joint names and EE names parameters
   std::string arm_id;
@@ -85,7 +92,7 @@ bool FLIQCJointVelocityNoEnvNode::init(hardware_interface::RobotHW* robot_hardwa
   std::vector<double> q_dot_max;
   READ_PARAM_SILENT(node_handle, controller_name, "/fliqc_controller_core/q_dot_max", q_dot_max);
   controller_ptr_->q_dot_max = Eigen::Map<Eigen::VectorXd>(q_dot_max.data(), q_dot_max.size());
-  ROS_INFO_STREAM("FLIQCJointVelocityNoEnvNode: Getting parameter q_dot_max: " << controller_ptr_->q_dot_max.transpose());
+  ROS_INFO_STREAM(controller_name << ": Getting parameter q_dot_max: " << controller_ptr_->q_dot_max.transpose());
 
   // Initialize the robot environment evaluator in robot_env_evaluator
   pinocchio::Model model;
@@ -107,6 +114,9 @@ bool FLIQCJointVelocityNoEnvNode::init(hardware_interface::RobotHW* robot_hardwa
   obsRadiusList_.push_back(0.05);
   obsList_.push_back(Eigen::Vector3d(0.30, 0.3, 0.6));
   obsRadiusList_.push_back(0.05); 
+
+  // Initialize the error flag
+  error_flag_ = false;
 
   return true;
 }
@@ -163,7 +173,7 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
       last_publish_time = ros::Time::now();
       static ros::Publisher obs_pub;
       if (!obs_pub){
-        obs_pub = node_handle.advertise<visualization_msgs::MarkerArray>("obstacles", 1);
+        obs_pub = node_handle.advertise<visualization_msgs::MarkerArray>("obstacles", 10);
       }
       // publish the obstacle
       visualization_msgs::MarkerArray obs_marker_array;
@@ -226,7 +236,7 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
       last_publish_time = ros::Time::now();
       static ros::Publisher obs_pub;
       if (!obs_pub){
-        obs_pub = node_handle.advertise<visualization_msgs::MarkerArray>("obstacles", 1);
+        obs_pub = node_handle.advertise<visualization_msgs::MarkerArray>("controller_info", 10);
       }
       visualization_msgs::MarkerArray obs_marker_array;
       geometry_msgs::Point point_helper;
@@ -330,7 +340,7 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
         last_publish_time = ros::Time::now();
         static ros::Publisher obs_pub;
         if (!obs_pub){
-          obs_pub = node_handle.advertise<visualization_msgs::MarkerArray>("obstacles", 1);
+          obs_pub = node_handle.advertise<visualization_msgs::MarkerArray>("environment_result", 10);
         }
         visualization_msgs::MarkerArray obs_marker_array;
         geometry_msgs::Point point_helper;
@@ -465,16 +475,71 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
   // }
 
   // run the controller
-  Eigen::VectorXd q_dot_command = controller_ptr_->runController(q_dot_guide, cost_input, distance_inputs);
-  if (goal_diff.norm() >= 0.01) {
-    for (size_t i = 0; i < 7; ++i) {
-      velocity_joint_handles_[i].setCommand(q_dot_command(i));
+  Eigen::VectorXd q_dot_command;
+
+  if (!error_flag_) {
+    try {
+      q_dot_command = controller_ptr_->runController(q_dot_guide, cost_input, distance_inputs);
+
+    } catch (const FLIQC_controller_core::LCQPowException& e) {
+      error_flag_ = true;
+      ROS_ERROR_STREAM_ONCE(controller_name << ": LCQPowException caught during runController:\n" << e.what());
+
+      try {
+        // Get the root path of the package using rospack
+        std::string package_path = ros::package::getPath("fliqc_controller_ros");
+        if (package_path.empty()) {
+          ROS_ERROR_STREAM("Failed to find package path for fliqc_controller_ros.");
+          throw std::runtime_error("Package path not found.");
+        }
+
+        // Create the log directory if it doesn't exist
+        std::string log_dir = package_path + "/log";
+        std::filesystem::create_directories(log_dir);
+
+        // Create a subdirectory with the current time
+        auto now = std::chrono::system_clock::now();
+        auto time_t_now = std::chrono::system_clock::to_time_t(now);
+        std::ostringstream time_stream;
+        time_stream << std::put_time(std::localtime(&time_t_now), "%Y-%m-%d_%H-%M-%S-%Z");
+        std::string base_dir = log_dir + "/" + time_stream.str() + "_" + controller_name;
+        std::filesystem::create_directories(base_dir);
+
+        // Create subdirectories for different types of logs
+        FLIQC_controller_core::logLCQPowExceptionAsFile(e, base_dir);
+
+      } catch (const std::exception& ex) {
+        ROS_ERROR_STREAM("Failed to save exception to log: " << ex.what());
+      }
+
+      throw std::runtime_error("LCQPowException caught during runController.");
+    } catch (const std::exception& e) {
+      error_flag_ = true;
+      ROS_ERROR_STREAM_ONCE(controller_name << ": std::exception caught during runController:\n" << e.what());
+      throw std::runtime_error("std::exception caught during runController.");
+    } catch (...) {
+      error_flag_ = true;
+      ROS_ERROR_STREAM_ONCE(controller_name << ": Unknown exception caught during runController.");
+      throw std::runtime_error("Unknown exception caught during runController.");
     }
-  }else{
-    ROS_INFO_ONCE("LCQPControllerFrankaModel: Goal reached with tolerance %f", goal_diff.norm());
+  }
+
+  if (!error_flag_) {
+    if (goal_diff.norm() >= 0.01) {
+      for (size_t i = 0; i < 7; ++i) {
+        velocity_joint_handles_[i].setCommand(q_dot_command(i));
+      }
+    } else {
+      ROS_INFO_STREAM_THROTTLE(1, controller_name << ": Goal reached with tolerance " << goal_diff.norm());
+      for (size_t i = 0; i < 7; ++i) {
+        velocity_joint_handles_[i].setCommand(0);
+      }
+    }
+  } else {
     for (size_t i = 0; i < 7; ++i) {
       velocity_joint_handles_[i].setCommand(0);
     }
+    ROS_WARN_STREAM_THROTTLE(1, controller_name << ": Error in the controller. Stopping the robot.");
   }
 }
 
