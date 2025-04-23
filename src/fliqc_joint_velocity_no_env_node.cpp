@@ -27,6 +27,14 @@
 #include <geometry_msgs/Point.h>
 #endif // CONTROLLER_DEBUG
 
+#ifdef CONTROLLER_PROFILE
+#define DBGNPROF_USE_ROS
+#define DBGNPROF_ENABLE_DEBUG
+#define DBGNPROF_ENABLE_PROFILE
+#endif // CONTROLLER_PROFILE
+
+#include <debug_and_profile_helper/helper_macros.hpp>
+
 namespace fliqc_controller_ros {
 
 // Set the variables for this controller
@@ -160,9 +168,7 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
             0, 0, 0, 1;
     obstacles.push_back({sphere, pose});
   }
-  env_evaluator_ptr_ -> computeDistances(q, obstacles, distances);
-  env_evaluator_ptr_ -> InspectGeomModelAndData();
-
+  
   // publish and visualize the obstacles
   #ifdef CONTROLLER_DEBUG
   // make a publisher for the obstacle, do it in 30Hz
@@ -206,7 +212,18 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
   } while(false);
   #endif // CONTROLLER_DEBUG
 
+  DBGNPROF_START_CLOCK; 
+  env_evaluator_ptr_ -> computeDistances(q, obstacles, distances);
+  DBGNPROF_STOP_CLOCK("computeDistances");
+  // //distances
+  // for (size_t i = 0; i < distances.size(); i++){
+  //   ROS_INFO_STREAM("[STEP1]FLIQCJointVelocityNoEnvNode: Distance " << i << " is "
+  //       << distances[i].distance << " with projector " << std::endl 
+  //       << distances[i].projector_jointspace_to_dist.transpose());
+  // }
+
   // Calculate the targeted velocity goal
+  DBGNPROF_START_CLOCK;
   Eigen::VectorXd q_dot_guide(dim_q_);
   
   Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
@@ -226,6 +243,7 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
   }
   Eigen::MatrixXd Jpos = J.block<3, 7>(0, 0);
   q_dot_guide = Jpos.jacobiSvd(Eigen::ComputeThinU | Eigen::ComputeThinV).solve(goal_diff_regularized);
+  DBGNPROF_STOP_CLOCK("Kinematics");
   
   // publish and visualize the controller start and goal information
   #ifdef CONTROLLER_DEBUG
@@ -319,18 +337,6 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
   } while(false);
   #endif // CONTROLLER_DEBUG
 
-  // Calculate the controller cost input
-  FLIQC_controller_core::FLIQC_cost_input cost_input;
-  cost_input.Q = Eigen::MatrixXd::Identity(dim_q_, dim_q_);
-  cost_input.g = Eigen::VectorXd::Zero(dim_q_);
-
-  // //distances
-  // for (size_t i = 0; i < distances.size(); i++){
-  //   ROS_INFO_STREAM("[STEP1]FLIQCJointVelocityNoEnvNode: Distance " << i << " is "
-  //       << distances[i].distance << " with projector " << std::endl 
-  //       << distances[i].projector_jointspace_to_dist.transpose());
-  // }
-  
   // publish and visualize the world enviroment calculation information
   #ifdef CONTROLLER_DEBUG
     do{
@@ -449,6 +455,12 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
     } while(false);
   #endif // CONTROLLER_DEBUG
 
+  DBGNPROF_START_CLOCK;
+  // Calculate the controller cost input
+  FLIQC_controller_core::FLIQC_cost_input cost_input;
+  cost_input.Q = Eigen::MatrixXd::Identity(dim_q_, dim_q_);
+  cost_input.g = Eigen::VectorXd::Zero(dim_q_);
+
   // Get the obstacle distance information and convert it as the distance input for the controller
   std::vector<FLIQC_controller_core::FLIQC_distance_input> distance_inputs;
   for (size_t i = 0; i < distances.size(); ++i){
@@ -458,6 +470,7 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
     distance_input.projector_control_to_dist = distances[i].projector_jointspace_to_dist.transpose();
     distance_inputs.push_back(distance_input);
   }
+  DBGNPROF_STOP_CLOCK("organizeData");
 
   // //debug: distance_inputs
   // for (size_t i = 0; i < distance_inputs.size(); ++i){
@@ -479,7 +492,9 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
 
   if (!error_flag_) {
     try {
+      DBGNPROF_START_CLOCK;
       q_dot_command = controller_ptr_->runController(q_dot_guide, cost_input, distance_inputs);
+      DBGNPROF_STOP_CLOCK("runController");
 
     } catch (const FLIQC_controller_core::LCQPowException& e) {
       error_flag_ = true;

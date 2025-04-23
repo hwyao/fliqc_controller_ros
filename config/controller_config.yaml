@@ -52,6 +52,18 @@ fliqc_joint_velocity_no_env_node_debug:
         - $(arg arm_id)_joint6
         - $(arg arm_id)_joint7
 
+fliqc_joint_velocity_no_env_node_profile:
+    type: fliqc_controller_ros/FLIQCJointVelocityNoEnvNodeProfile
+    arm_id: $(arg arm_id)
+    joint_names:
+        - $(arg arm_id)_joint1
+        - $(arg arm_id)_joint2
+        - $(arg arm_id)_joint3
+        - $(arg arm_id)_joint4
+        - $(arg arm_id)_joint5
+        - $(arg arm_id)_joint6
+        - $(arg arm_id)_joint7
+
 fliqc_joint_velocity_standard:
     type: fliqc_controller_ros/FLIQCJointVelocityStandard
     arm_id: $(arg arm_id)
@@ -66,6 +78,18 @@ fliqc_joint_velocity_standard:
 
 fliqc_joint_velocity_standard_debug:
     type: fliqc_controller_ros/FLIQCJointVelocityStandardDebug
+    arm_id: $(arg arm_id)
+    joint_names:
+        - $(arg arm_id)_joint1
+        - $(arg arm_id)_joint2
+        - $(arg arm_id)_joint3
+        - $(arg arm_id)_joint4
+        - $(arg arm_id)_joint5
+        - $(arg arm_id)_joint6
+        - $(arg arm_id)_joint7
+
+fliqc_joint_velocity_standard_profile:
+    type: fliqc_controller_ros/FLIQCJointVelocityStandardProfile
     arm_id: $(arg arm_id)
     joint_names:
         - $(arg arm_id)_joint1

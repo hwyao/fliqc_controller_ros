@@ -10,7 +10,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
   roscpp
-  
+  roslib
   controller_interface
   hardware_interface
   pluginlib
@@ -18,6 +18,7 @@ find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
   moveit_msgs
   std_msgs
+  debug_and_profile_helper
 )
 
 ## System dependencies are found with CMake's conventions
@@ -80,7 +81,7 @@ add_library(fliqc_controller_ros_debug
   src/apf_joint_velocity.cpp
 )
 target_compile_features(fliqc_controller_ros_debug PUBLIC 
-    cxx_std_17                                                # requires CMake 3.8
+    cxx_std_17                                               
 )
 target_link_libraries(fliqc_controller_ros_debug PUBLIC
   ${catkin_LIBRARIES}
@@ -91,6 +92,21 @@ target_compile_definitions(fliqc_controller_ros_debug PUBLIC
   CONTROLLER_DEBUG
 )
 
+add_library(fliqc_controller_ros_profile
+  src/fliqc_joint_velocity_no_env_node.cpp
+  src/fliqc_joint_velocity_standard.cpp
+)
+target_compile_features(fliqc_controller_ros_profile PUBLIC 
+    cxx_std_17
+)
+target_link_libraries(fliqc_controller_ros_profile PUBLIC
+  ${catkin_LIBRARIES}
+  FLIQC_controller_core
+  robot_env_evaluator
+)
+target_compile_definitions(fliqc_controller_ros_profile PUBLIC 
+  CONTROLLER_PROFILE
+)
 ## Add cmake target dependencies of the library
 ## as an example, code may need to be generated before libraries
 ## either from message generation or dynamic reconfigure
