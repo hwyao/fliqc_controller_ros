@@ -40,7 +40,7 @@ class APFJointVelocity : public controller_interface::MultiInterfaceController<
   std::unique_ptr<FLIQC_controller_core::FLIQC_controller_joint_velocity_basic> controller_ptr_;
   std::unique_ptr<robot_env_evaluator::RobotEnvEvaluator> env_evaluator_ptr_;
 
-  int dim_q_;                          ///< The dimension of the joint q 
+  int dim_q_; //< The dimension of the joint q 
 
   // the obstacle list
   std::vector<robot_env_evaluator::obstacleInput> obstacles_;
@@ -54,7 +54,7 @@ class APFJointVelocity : public controller_interface::MultiInterfaceController<
   double distance_to_goal_ = -100;
 
   Eigen::Vector3d goal_pos_ = Eigen::Vector3d::Zero(); // store goal pos 
-  Eigen::Quaterniond  goal_orientation_ = Eigen::Quaterniond(1, 0.0, 0.0, 0.0);
+  Eigen::Quaterniond  goal_orientation_ = Eigen::Quaterniond(1, 0.0, 0.0, 0.0); // store goal orientation
   // the mutex for the obstacles
   std::mutex obstacles_mutex_;
 };
