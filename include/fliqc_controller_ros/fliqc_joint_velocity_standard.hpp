@@ -42,15 +42,22 @@ class FLIQCJointVelocityStandard : public controller_interface::MultiInterfaceCo
 
   // the obstacle list
   std::vector<robot_env_evaluator::obstacleInput> obstacles_;
+
   // the subscriber list
   ros::Subscriber targeted_velocity_sub_;
   ros::Subscriber dist_to_goal_sub_;
   ros::Subscriber planning_scene_sub_;
-  // the targeted velocity and distance to goal
-  Eigen::Vector3d targeted_velocity_ = Eigen::Vector3d(-100,-100,-100);
-  double distance_to_goal_ = -100;
+
+  // the subscriber variables, targeted velocity and distance to goal
+  Eigen::Vector3d targeted_velocity_ = Eigen::Vector3d::Zero(); 
+  double distance_to_goal_ = 100.0;
+  bool first_receive_obstacle_ = false;
+
   // the mutex for the obstacles
   std::mutex obstacles_mutex_;
+
+  // error flag
+  bool error_flag_ = false;
 };
 
 }  // namespace fliqc_controller_ros

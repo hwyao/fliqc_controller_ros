@@ -11,7 +11,7 @@
   </include>
 
   <include file="$(find fliqc_controller_ros)/launch/gazebo_sim.launch" pass_all_args="true">
-    <arg name="controller" value="fliqc_joint_velocity_standard_debug" />
+    <arg name="controller" value="fliqc_joint_velocity_standard_profile" />
   </include>
   
   <include file="$(find multi_agent_vector_fields)/launch/multi_agent_feedback_node.launch"/>

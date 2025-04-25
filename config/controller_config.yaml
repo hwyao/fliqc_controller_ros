@@ -11,8 +11,8 @@ joint_velocity_example_controller:
         - $(arg arm_id)_joint7
 
 lcqpow:
-    complementarityTolerance: 2.221E-13
-    stationarityTolerance: 2.221E-10
+    complementarityTolerance: 2.221E-6
+    stationarityTolerance: 2.221E-4
     initialPenaltyParameter: 0.01
     penaltyUpdateFactor: 2.0
 
@@ -23,7 +23,7 @@ fliqc_controller_core:
     lambda_max: 1.7976931348623157E+308
     enable_esc_vel_constraint: false
     esc_vel_max: 1.7976931348623157E+308
-    dt: 0.02
+    dt: 0.01
     eps: 0.01
     active_threshold: 0.03
     q_dot_max: [2.1750, 2.1750, 2.1750, 2.1750, 2.6100, 2.6100, 2.6100]   # [rad/s]
@@ -52,6 +52,18 @@ fliqc_joint_velocity_no_env_node_debug:
         - $(arg arm_id)_joint6
         - $(arg arm_id)_joint7
 
+fliqc_joint_velocity_no_env_node_profile:
+    type: fliqc_controller_ros/FLIQCJointVelocityNoEnvNodeProfile
+    arm_id: $(arg arm_id)
+    joint_names:
+        - $(arg arm_id)_joint1
+        - $(arg arm_id)_joint2
+        - $(arg arm_id)_joint3
+        - $(arg arm_id)_joint4
+        - $(arg arm_id)_joint5
+        - $(arg arm_id)_joint6
+        - $(arg arm_id)_joint7
+
 fliqc_joint_velocity_standard:
     type: fliqc_controller_ros/FLIQCJointVelocityStandard
     arm_id: $(arg arm_id)
@@ -66,6 +78,18 @@ fliqc_joint_velocity_standard:
 
 fliqc_joint_velocity_standard_debug:
     type: fliqc_controller_ros/FLIQCJointVelocityStandardDebug
+    arm_id: $(arg arm_id)
+    joint_names:
+        - $(arg arm_id)_joint1
+        - $(arg arm_id)_joint2
+        - $(arg arm_id)_joint3
+        - $(arg arm_id)_joint4
+        - $(arg arm_id)_joint5
+        - $(arg arm_id)_joint6
+        - $(arg arm_id)_joint7
+
+fliqc_joint_velocity_standard_profile:
+    type: fliqc_controller_ros/FLIQCJointVelocityStandardProfile
     arm_id: $(arg arm_id)
     joint_names:
         - $(arg arm_id)_joint1

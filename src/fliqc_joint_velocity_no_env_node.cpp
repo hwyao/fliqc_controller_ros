@@ -2,19 +2,24 @@
 #include <pinocchio/parsers/srdf.hpp>
 #include <pinocchio/algorithm/model.hpp>
 
-#include <fliqc_controller_ros/fliqc_joint_velocity_no_env_node.hpp>
-#include <fliqc_controller_ros/helpers.hpp>
-#include "robot_env_evaluator/robot_env_evaluator_path.h"
-#include "robot_env_evaluator/robot_presets.hpp"
+#include "fliqc_controller_ros/fliqc_joint_velocity_no_env_node.hpp"
+#include "fliqc_controller_ros/helpers.hpp"
+#include <robot_env_evaluator/robot_env_evaluator_path.h>
+#include <robot_env_evaluator/robot_presets.hpp>
 
 #include <cmath>
 #include <array>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <chrono>
 
+#include <ros/ros.h>
+#include <ros/package.h>
 #include <controller_interface/controller_base.h>
 #include <hardware_interface/hardware_interface.h>
 #include <hardware_interface/joint_command_interface.h>
 #include <pluginlib/class_list_macros.h>
-#include <ros/ros.h>
 
 #ifdef CONTROLLER_DEBUG
 #include <visualization_msgs/MarkerArray.h>
@@ -22,12 +27,22 @@
 #include <geometry_msgs/Point.h>
 #endif // CONTROLLER_DEBUG
 
+#ifdef CONTROLLER_PROFILE
+#define DBGNPROF_USE_ROS
+#define DBGNPROF_ENABLE_DEBUG
+#define DBGNPROF_ENABLE_PROFILE
+#endif // CONTROLLER_PROFILE
+
+#include <debug_and_profile_helper/helper_macros.hpp>
+
 namespace fliqc_controller_ros {
+
+// Set the variables for this controller
+static std::string controller_name = "FLIQCJointVelocityNoEnvNode";
 
 bool FLIQCJointVelocityNoEnvNode::init(hardware_interface::RobotHW* robot_hardware,
                                                    ros::NodeHandle& node_handle) {
   // Set the variables for this controller
-  std::string controller_name = "FLIQCJointVelocityNoEnvNode";
                                             
   // Get robot arm id, joint names and EE names parameters
   std::string arm_id;
@@ -85,7 +100,7 @@ bool FLIQCJointVelocityNoEnvNode::init(hardware_interface::RobotHW* robot_hardwa
   std::vector<double> q_dot_max;
   READ_PARAM_SILENT(node_handle, controller_name, "/fliqc_controller_core/q_dot_max", q_dot_max);
   controller_ptr_->q_dot_max = Eigen::Map<Eigen::VectorXd>(q_dot_max.data(), q_dot_max.size());
-  ROS_INFO_STREAM("FLIQCJointVelocityNoEnvNode: Getting parameter q_dot_max: " << controller_ptr_->q_dot_max.transpose());
+  ROS_INFO_STREAM(controller_name << ": Getting parameter q_dot_max: " << controller_ptr_->q_dot_max.transpose());
 
   // Initialize the robot environment evaluator in robot_env_evaluator
   pinocchio::Model model;
@@ -107,6 +122,9 @@ bool FLIQCJointVelocityNoEnvNode::init(hardware_interface::RobotHW* robot_hardwa
   obsRadiusList_.push_back(0.05);
   obsList_.push_back(Eigen::Vector3d(0.30, 0.3, 0.6));
   obsRadiusList_.push_back(0.05); 
+
+  // Initialize the error flag
+  error_flag_ = false;
 
   return true;
 }
@@ -150,10 +168,8 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
             0, 0, 0, 1;
     obstacles.push_back({sphere, pose});
   }
-  env_evaluator_ptr_ -> computeDistances(q, obstacles, distances);
-  env_evaluator_ptr_ -> InspectGeomModelAndData();
-
-  // publish and visualize the obstacles
+  
+  // publish and visualize the obstacles made by this controller
   #ifdef CONTROLLER_DEBUG
   // make a publisher for the obstacle, do it in 30Hz
   do{
@@ -163,7 +179,7 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
       last_publish_time = ros::Time::now();
       static ros::Publisher obs_pub;
       if (!obs_pub){
-        obs_pub = node_handle.advertise<visualization_msgs::MarkerArray>("obstacles", 1);
+        obs_pub = node_handle.advertise<visualization_msgs::MarkerArray>("obstacles", 10);
       }
       // publish the obstacle
       visualization_msgs::MarkerArray obs_marker_array;
@@ -196,6 +212,18 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
   } while(false);
   #endif // CONTROLLER_DEBUG
 
+  DBGNPROF_START_CLOCK; 
+  env_evaluator_ptr_ -> computeDistances(q, obstacles, distances);
+  DBGNPROF_STOP_CLOCK("computeDistances");
+
+  // //distances
+  // for (size_t i = 0; i < distances.size(); i++){
+  //   ROS_INFO_STREAM("[STEP1]FLIQCJointVelocityNoEnvNode: Distance " << i << " is "
+  //       << distances[i].distance << " with projector " << std::endl 
+  //       << distances[i].projector_jointspace_to_dist.transpose());
+  // }
+
+  DBGNPROF_START_CLOCK;
   // Calculate the targeted velocity goal
   Eigen::VectorXd q_dot_guide(dim_q_);
   
@@ -216,17 +244,98 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
   }
   Eigen::MatrixXd Jpos = J.block<3, 7>(0, 0);
   q_dot_guide = Jpos.jacobiSvd(Eigen::ComputeThinU | Eigen::ComputeThinV).solve(goal_diff_regularized);
-  
+  DBGNPROF_STOP_CLOCK("Kinematics");
+
+  DBGNPROF_START_CLOCK;
+  // Calculate the controller cost input
+  FLIQC_controller_core::FLIQC_cost_input cost_input;
+  cost_input.Q = Eigen::MatrixXd::Identity(dim_q_, dim_q_);
+  cost_input.g = Eigen::VectorXd::Zero(dim_q_);
+
+  // Get the obstacle distance information and convert it as the distance input for the controller
+  std::vector<FLIQC_controller_core::FLIQC_distance_input> distance_inputs;
+  for (size_t i = 0; i < distances.size(); ++i){
+    FLIQC_controller_core::FLIQC_distance_input distance_input;
+    distance_input.id = i;
+    distance_input.distance = distances[i].distance;
+    distance_input.projector_control_to_dist = distances[i].projector_jointspace_to_dist.transpose();
+    distance_inputs.push_back(distance_input);
+  }
+  DBGNPROF_STOP_CLOCK("organizeData");
+
+  // //debug: distance_inputs
+  // for (size_t i = 0; i < distance_inputs.size(); ++i){
+  //   ROS_INFO_STREAM("[STEP2]FLIQCJointVelocityNoEnvNode: Distance " << i << " is " 
+  //       << distance_inputs[i].distance << " with projector " << std::endl << distance_inputs[i].projector_control_to_dist);
+  // }
+
+  //debug: distance_inputs activated
+  // for (size_t i = 0; i < distance_inputs.size(); ++i){
+  //   if (distance_inputs[i].distance < controller_ptr_->active_threshold){
+      
+  //     ROS_INFO_STREAM("[STEP2_COND]FLIQCJointVelocityNoEnvNode: Distance " << i << " is " 
+  //         << distance_inputs[i].distance << " with projector " << std::endl << distance_inputs[i].projector_control_to_dist);
+  //   }
+  // }
+
+  // run the controller
+  Eigen::VectorXd q_dot_command;
+
+  if (!error_flag_) {
+    try {
+      DBGNPROF_START_CLOCK;
+      q_dot_command = controller_ptr_->runController(q_dot_guide, cost_input, distance_inputs);
+      DBGNPROF_STOP_CLOCK("runController");
+
+    } catch (const FLIQC_controller_core::LCQPowException& e) {
+      error_flag_ = true;
+      ROS_ERROR_STREAM_ONCE(controller_name << ": LCQPowException caught during runController:\n" << e.what());
+
+      try {
+        // Get the root path of the package using rospack
+        std::string package_path = ros::package::getPath("fliqc_controller_ros");
+        if (package_path.empty()) {
+          ROS_ERROR_STREAM("Failed to find package path for fliqc_controller_ros.");
+          throw std::runtime_error("Package path not found.");
+        }
+
+        // Create the log directory if it doesn't exist
+        std::string log_dir = package_path + "/log";
+        std::filesystem::create_directories(log_dir);
+
+        // Create a subdirectory with the current time
+        auto now = std::chrono::system_clock::now();
+        auto time_t_now = std::chrono::system_clock::to_time_t(now);
+        std::ostringstream time_stream;
+        time_stream << std::put_time(std::localtime(&time_t_now), "%Y-%m-%d_%H-%M-%S-%Z");
+        std::string base_dir = log_dir + "/" + time_stream.str() + "_" + controller_name;
+        std::filesystem::create_directories(base_dir);
+
+        // Create subdirectories for different types of logs
+        FLIQC_controller_core::logLCQPowExceptionAsFile(e, base_dir);
+
+      } catch (const std::exception& ex) {
+        ROS_ERROR_STREAM("Failed to save exception to log: " << ex.what());
+      }
+    } catch (const std::exception& e) {
+      error_flag_ = true;
+      ROS_ERROR_STREAM_ONCE(controller_name << ": std::exception caught during runController:\n" << e.what());
+    } catch (...) {
+      error_flag_ = true;
+      ROS_ERROR_STREAM_ONCE(controller_name << ": Unknown exception caught during runController.");
+    }
+  }
+
   // publish and visualize the controller start and goal information
   #ifdef CONTROLLER_DEBUG
   do{
     static ros::NodeHandle node_handle;
     static ros::Time last_publish_time = ros::Time::now();
-    if (ros::Time::now() - last_publish_time > ros::Duration(1.0/30)){
+    if (ros::Time::now() - last_publish_time > ros::Duration(1.0/30)|| error_flag_ == true){
       last_publish_time = ros::Time::now();
       static ros::Publisher obs_pub;
       if (!obs_pub){
-        obs_pub = node_handle.advertise<visualization_msgs::MarkerArray>("obstacles", 1);
+        obs_pub = node_handle.advertise<visualization_msgs::MarkerArray>("controller_info", 10);
       }
       visualization_msgs::MarkerArray obs_marker_array;
       geometry_msgs::Point point_helper;
@@ -309,28 +418,16 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
   } while(false);
   #endif // CONTROLLER_DEBUG
 
-  // Calculate the controller cost input
-  FLIQC_controller_core::FLIQC_cost_input cost_input;
-  cost_input.Q = Eigen::MatrixXd::Identity(dim_q_, dim_q_);
-  cost_input.g = Eigen::VectorXd::Zero(dim_q_);
-
-  // //distances
-  // for (size_t i = 0; i < distances.size(); i++){
-  //   ROS_INFO_STREAM("[STEP1]FLIQCJointVelocityNoEnvNode: Distance " << i << " is "
-  //       << distances[i].distance << " with projector " << std::endl 
-  //       << distances[i].projector_jointspace_to_dist.transpose());
-  // }
-  
   // publish and visualize the world enviroment calculation information
   #ifdef CONTROLLER_DEBUG
     do{
       static ros::NodeHandle node_handle;
       static ros::Time last_publish_time = ros::Time::now();
-      if (ros::Time::now() - last_publish_time > ros::Duration(1.0/30)){
+      if (ros::Time::now() - last_publish_time > ros::Duration(1.0/30)|| error_flag_ == true){
         last_publish_time = ros::Time::now();
         static ros::Publisher obs_pub;
         if (!obs_pub){
-          obs_pub = node_handle.advertise<visualization_msgs::MarkerArray>("obstacles", 1);
+          obs_pub = node_handle.advertise<visualization_msgs::MarkerArray>("environment_result", 10);
         }
         visualization_msgs::MarkerArray obs_marker_array;
         geometry_msgs::Point point_helper;
@@ -439,42 +536,19 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
     } while(false);
   #endif // CONTROLLER_DEBUG
 
-  // Get the obstacle distance information and convert it as the distance input for the controller
-  std::vector<FLIQC_controller_core::FLIQC_distance_input> distance_inputs;
-  for (size_t i = 0; i < distances.size(); ++i){
-    FLIQC_controller_core::FLIQC_distance_input distance_input;
-    distance_input.id = i;
-    distance_input.distance = distances[i].distance;
-    distance_input.projector_control_to_dist = distances[i].projector_jointspace_to_dist.transpose();
-    distance_inputs.push_back(distance_input);
-  }
-
-  // //debug: distance_inputs
-  // for (size_t i = 0; i < distance_inputs.size(); ++i){
-  //   ROS_INFO_STREAM("[STEP2]FLIQCJointVelocityNoEnvNode: Distance " << i << " is " 
-  //       << distance_inputs[i].distance << " with projector " << std::endl << distance_inputs[i].projector_control_to_dist);
-  // }
-
-  //debug: distance_inputs activated
-  // for (size_t i = 0; i < distance_inputs.size(); ++i){
-  //   if (distance_inputs[i].distance < controller_ptr_->active_threshold){
-      
-  //     ROS_INFO_STREAM("[STEP2_COND]FLIQCJointVelocityNoEnvNode: Distance " << i << " is " 
-  //         << distance_inputs[i].distance << " with projector " << std::endl << distance_inputs[i].projector_control_to_dist);
-  //   }
-  // }
-
-  // run the controller
-  Eigen::VectorXd q_dot_command = controller_ptr_->runController(q_dot_guide, cost_input, distance_inputs);
-  if (goal_diff.norm() >= 0.01) {
+  if (!error_flag_) {
     for (size_t i = 0; i < 7; ++i) {
       velocity_joint_handles_[i].setCommand(q_dot_command(i));
     }
-  }else{
-    ROS_INFO_ONCE("LCQPControllerFrankaModel: Goal reached with tolerance %f", goal_diff.norm());
+    if (goal_diff.norm() <= 0.005) {
+      ROS_INFO_STREAM_THROTTLE(1, controller_name << ": Goal reached with tolerance " << goal_diff.norm());
+    }
+  } else {
+    // enter error handling mode here, now only emegency stop.
     for (size_t i = 0; i < 7; ++i) {
       velocity_joint_handles_[i].setCommand(0);
     }
+    throw std::runtime_error("Error in controller, stopping the robot.");
   }
 }
 
