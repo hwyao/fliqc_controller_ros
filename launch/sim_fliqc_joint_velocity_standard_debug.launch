@@ -10,9 +10,12 @@
     <arg name="env_scene" value="$(arg env_scene)"/>
   </include>
 
-  <include file="$(find fliqc_controller_ros)/launch/gazebo_sim.launch" pass_all_args="true">
-    <arg name="controller" value="fliqc_joint_velocity_standard_debug" />
-  </include>
+  <node pkg="fliqc_controller_ros" type="launch_simulation.py" output="screen" name="launch_simulation">
+    <param name="robot" value="$(arg robot)"/>
+    <param name="arm_id" value="$(arg arm_id)"/>
+    <param name="env_scene" value="$(arg env_scene)"/>
+    <param name="controller" value="fliqc_joint_velocity_standard_debug"/>
+  </node>
   
   <include file="$(find multi_agent_vector_fields)/launch/multi_agent_feedback_node.launch"/>
 

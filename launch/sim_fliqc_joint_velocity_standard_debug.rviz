@@ -3,8 +3,7 @@ Panels:
     Help Height: 89
     Name: Displays
     Property Tree Widget:
-      Expanded:
-        - /MarkerArray4
+      Expanded: ~
       Splitter Ratio: 0.4077380895614624
     Tree Height: 713
   - Class: rviz/Selection
@@ -181,7 +180,7 @@ Visualization Manager:
       Enabled: true
       Filter (blacklist): ""
       Filter (whitelist): ""
-      Frame Timeout: 15
+      Frame Timeout: 30
       Frames:
         All Enabled: false
         agent_frame:
@@ -242,7 +241,7 @@ Visualization Manager:
           Value: true
         world:
           Value: true
-      Marker Alpha: 1
+      Marker Alpha: 0.5
       Marker Scale: 0.15000000596046448
       Name: TF
       Show Arrows: true
@@ -327,15 +326,13 @@ Visualization Manager:
       Unreliable: false
       Value: true
     - Class: rviz/Marker
-      Enabled: true
+      Enabled: false
       Marker Topic: /visualization_marker
       Name: Marker
       Namespaces:
-        multi_agent_agent: false
-        multi_agent_predicted_path: true
-        multi_agent_trajectory: true
+        {}
       Queue Size: 100
-      Value: true
+      Value: false
     - Class: rviz/MarkerArray
       Enabled: true
       Marker Topic: /controller_info
@@ -360,16 +357,16 @@ Visualization Manager:
       Marker Topic: /obstacle_markers
       Name: MarkerArray
       Namespaces:
-        VerticalWall_Ball_0_5: true
-        VerticalWall_Ball_0_9: true
-        VerticalWall_Ball_1_5: true
-        VerticalWall_Ball_1_9: true
-        VerticalWall_Ball_2_5: true
-        VerticalWall_Ball_2_9: true
-        VerticalWall_Ball_3_5: true
-        VerticalWall_Ball_3_9: true
-        VerticalWall_Ball_4_5: true
-        VerticalWall_Ball_4_9: true
+        Obstacle1: true
+        Obstacle2: true
+      Queue Size: 100
+      Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /controller_result
+      Name: MarkerArray
+      Namespaces:
+        controller_result: true
       Queue Size: 100
       Value: true
   Enabled: true
@@ -400,7 +397,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 3.175075054168701
+      Distance: 1.6687779426574707
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -416,9 +413,9 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.5403973460197449
+      Pitch: 0.6903975605964661
       Target Frame: <Fixed Frame>
-      Yaw: 0.3972401022911072
+      Yaw: 0.45724019408226013
     Saved: ~
 Window Geometry:
   Displays:
