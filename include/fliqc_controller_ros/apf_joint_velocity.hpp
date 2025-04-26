@@ -16,6 +16,8 @@
 #include <std_msgs/Float64.h>
 #include <geometry_msgs/TwistStamped.h>
 #include <moveit_msgs/PlanningScene.h>
+#include <geometry_msgs/PoseStamped.h>
+
 
 namespace fliqc_controller_ros {
 
@@ -30,8 +32,7 @@ class APFJointVelocity : public controller_interface::MultiInterfaceController<
   void planningSceneCallback(const moveit_msgs::PlanningScene::ConstPtr& msg);
   void targetedVelocityCallback(const geometry_msgs::TwistStamped::ConstPtr& msg);
   void distanceToGoalCallback(const std_msgs::Float64::ConstPtr& msg);
-  void goalPosCallback(const geometry_msgs::Point::ConstPtr& msg);
-
+  void goalPosCallback(const geometry_msgs::PoseStamped::ConstPtr& msg);
  private:
   std::vector<hardware_interface::JointHandle> velocity_joint_handles_;
   ros::Duration elapsed_time_;
@@ -39,7 +40,7 @@ class APFJointVelocity : public controller_interface::MultiInterfaceController<
   std::unique_ptr<FLIQC_controller_core::FLIQC_controller_joint_velocity_basic> controller_ptr_;
   std::unique_ptr<robot_env_evaluator::RobotEnvEvaluator> env_evaluator_ptr_;
 
-  int dim_q_;                          ///< The dimension of the joint q 
+  int dim_q_; //< The dimension of the joint q 
 
   // the obstacle list
   std::vector<robot_env_evaluator::obstacleInput> obstacles_;
@@ -53,6 +54,7 @@ class APFJointVelocity : public controller_interface::MultiInterfaceController<
   double distance_to_goal_ = -100;
 
   Eigen::Vector3d goal_pos_ = Eigen::Vector3d::Zero(); // store goal pos 
+  Eigen::Quaterniond  goal_orientation_ = Eigen::Quaterniond(1, 0.0, 0.0, 0.0); // store goal orientation
   // the mutex for the obstacles
   std::mutex obstacles_mutex_;
 };

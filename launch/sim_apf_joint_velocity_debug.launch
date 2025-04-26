@@ -5,7 +5,7 @@
 
   <rosparam command="load" file="$(find fliqc_controller_ros)/config/controller_config.yaml" subst_value="true" />
   
-  <include file="$(find robot_env_publisher)/launch/obstacles_publisher.launch"/>
+  <include file="$(find robot_env_publisher)/launch/file_env_node.launch"/>
 
   <include file="$(find fliqc_controller_ros)/launch/gazebo_sim.launch" pass_all_args="true">
     <arg name="controller" value="apf_joint_velocity_debug" />

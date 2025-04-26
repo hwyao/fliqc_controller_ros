@@ -107,7 +107,7 @@ bool APFJointVelocity::init(hardware_interface::RobotHW* robot_hardware, ros::No
   // subscribe to the targeted velocity and goal to distance from the multi-agent system
   targeted_velocity_sub_ = node_handle.subscribe("/agent_twist_global", 1, &APFJointVelocity::targetedVelocityCallback, this);
   dist_to_goal_sub_ = node_handle.subscribe("/distance_to_goal", 1, &APFJointVelocity::distanceToGoalCallback, this);
-  goal_pos_sub_ = node_handle.subscribe("/goal_position", 1, &APFJointVelocity::goalPosCallback, this);
+  goal_pos_sub_ = node_handle.subscribe("/goal", 1, &APFJointVelocity::goalPosCallback, this);
   // subscribe to the planning scene information and wait for the first received message
   planning_scene_sub_ = node_handle.subscribe("/planning_scene", 1, &APFJointVelocity::planningSceneCallback, this);
   
@@ -153,14 +153,24 @@ void APFJointVelocity::planningSceneCallback(const moveit_msgs::PlanningScene::C
       }
   }
 }
-
-void APFJointVelocity::goalPosCallback(const geometry_msgs::Point::ConstPtr& msg)
+void APFJointVelocity::goalPosCallback(const geometry_msgs::PoseStamped::ConstPtr& msg)
 {
-  // store into goal_pos_
-  goal_pos_ = Eigen::Vector3d(msg->x, msg->y, msg->z);
-  // ROS_INFO_STREAM("Goal: " << goal_pos_.transpose());
-}
+  // Store the goal position
+    goal_pos_ = Eigen::Vector3d(msg->pose.position.x,
+    msg->pose.position.y,
+    msg->pose.position.z);
 
+  // Store the goal orientation
+  goal_orientation_ = Eigen::Quaterniond(
+      msg->pose.orientation.w,
+      msg->pose.orientation.x,
+      msg->pose.orientation.y,
+      msg->pose.orientation.z);
+
+  // Log the goal position and orientation
+  ROS_INFO_STREAM("Goal Position: " << goal_pos_.transpose());
+  ROS_INFO_STREAM("Goal Orientation: " << goal_orientation_.coeffs().transpose());
+}
 
 void APFJointVelocity::targetedVelocityCallback(const geometry_msgs::TwistStamped::ConstPtr& msg) 
 {
@@ -200,7 +210,7 @@ void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& p
   // ---------------------Translational Attractive Force--------------------------
   Eigen::Vector3d ee_pos = T_ee.block<3,1>(0,3);
   Eigen::Vector3d diff = goal_pos_ - ee_pos;
-  ROS_INFO_STREAM("EE pos: " << ee_pos.transpose() << " goal pos: " << goal_pos_.transpose());
+  //ROS_INFO_STREAM("EE pos: " << ee_pos.transpose() << " goal pos: " << goal_pos_.transpose());
 
   double kp = 2.0;
   double kv = 2.0;
@@ -248,13 +258,12 @@ void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& p
   // To do : get it from topic
   //Eigen::Quaterniond q_goal(0.96593, 0.25882, 0.0, 0.0);
 
-  Eigen::Quaterniond q_goal(1, 0.0, 0.0, 0.0);
-
+  //Eigen::Quaterniond q_goal(1, 0.0, 0.0, 0.0);
 
   double p0 = q_curr.w();
   Eigen::Vector3d pim = q_curr.vec();
-  double pg0 = q_goal.w();
-  Eigen::Vector3d pgim = q_goal.vec();
+  double pg0 = goal_orientation_.w();
+  Eigen::Vector3d pgim = goal_orientation_.vec();
 
   Eigen::Vector3d orientation_error = p0 * pgim - pg0 * pim - pim.cross(pgim);
 
