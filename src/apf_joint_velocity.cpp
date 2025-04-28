@@ -52,45 +52,6 @@ bool APFJointVelocity::init(hardware_interface::RobotHW* robot_hardware, ros::No
     );
   }
 
-  // Initialize the FLIQC controller in FLIQC_controller_core (Now we do not use it)
-  controller_ptr_ = std::make_unique<FLIQC_controller_core::FLIQC_controller_joint_velocity_basic>(dim_q_);
-  
-  // Get controller parameters: lcqpow parameters
-  READ_PARAM(node_handle, controller_name, 
-      "/lcqpow/complementarityTolerance", controller_ptr_->lcqp_solver.complementarityTolerance);
-  READ_PARAM(node_handle, controller_name,
-      "/lcqpow/stationarityTolerance", controller_ptr_->lcqp_solver.stationarityTolerance);
-  READ_PARAM(node_handle, controller_name,
-      "/lcqpow/initialPenaltyParameter", controller_ptr_->lcqp_solver.initialPenaltyParameter);
-  READ_PARAM(node_handle, controller_name,
-      "/lcqpow/penaltyUpdateFactor", controller_ptr_->lcqp_solver.penaltyUpdateFactor);
-  controller_ptr_->lcqp_solver.updateOptions();
-
-  // Get controller parameters: fliqc_controller_core parameters
-  READ_PARAM(node_handle, controller_name, 
-      "/fliqc_controller_core/buffer_history", controller_ptr_->buffer_history);
-  READ_PARAM(node_handle, controller_name,
-      "/fliqc_controller_core/enable_lambda_constraint_in_L", controller_ptr_->enable_lambda_constraint_in_L);
-  READ_PARAM(node_handle, controller_name,
-      "/fliqc_controller_core/enable_lambda_constraint_in_x", controller_ptr_->enable_lambda_constraint_in_x);
-  READ_PARAM(node_handle, controller_name,
-      "/fliqc_controller_core/lambda_max", controller_ptr_->lambda_max);
-  READ_PARAM(node_handle, controller_name,
-      "/fliqc_controller_core/enable_esc_vel_constraint", controller_ptr_->enable_esc_vel_constraint);
-  READ_PARAM(node_handle, controller_name,
-      "/fliqc_controller_core/esc_vel_max", controller_ptr_->esc_vel_max);
-  READ_PARAM(node_handle, controller_name,
-      "/fliqc_controller_core/dt", controller_ptr_->dt);
-  READ_PARAM(node_handle, controller_name,
-      "/fliqc_controller_core/eps", controller_ptr_->eps);
-  READ_PARAM(node_handle, controller_name,
-      "/fliqc_controller_core/active_threshold", controller_ptr_->active_threshold);
-  
-  std::vector<double> q_dot_max;
-  READ_PARAM_SILENT(node_handle, controller_name, "/fliqc_controller_core/q_dot_max", q_dot_max);
-  controller_ptr_->q_dot_max = Eigen::Map<Eigen::VectorXd>(q_dot_max.data(), q_dot_max.size());
-  ROS_INFO_STREAM(controller_name << ": Getting parameter q_dot_max: " << controller_ptr_->q_dot_max.transpose());
-
   // Initialize the robot environment evaluator in robot_env_evaluator
   pinocchio::Model model;
   std::string ee_name_preset;
@@ -103,7 +64,6 @@ bool APFJointVelocity::init(hardware_interface::RobotHW* robot_hardware, ros::No
 
   env_evaluator_ptr_ = std::make_unique<robot_env_evaluator::RobotEnvEvaluator>(model, ee_name_preset, joint_names_preset, collision_model);
 
-  
   // subscribe to the targeted velocity and goal to distance from the multi-agent system
   targeted_velocity_sub_ = node_handle.subscribe("/agent_twist_global", 1, &APFJointVelocity::targetedVelocityCallback, this);
   dist_to_goal_sub_ = node_handle.subscribe("/distance_to_goal", 1, &APFJointVelocity::distanceToGoalCallback, this);
@@ -153,6 +113,7 @@ void APFJointVelocity::planningSceneCallback(const moveit_msgs::PlanningScene::C
       }
   }
 }
+
 void APFJointVelocity::goalPosCallback(const geometry_msgs::PoseStamped::ConstPtr& msg)
 {
   // Store the goal position
@@ -194,10 +155,9 @@ void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& p
   {
     q(i) = velocity_joint_handles_[i].getPosition();
     qdot_joint(i) = velocity_joint_handles_[i].getVelocity();
-    
   }
 
-  //STEP 1 - use Haowen env_evaluator to calculate FK and jacobian 
+  //STEP 1 - use env_evaluator to calculate FK and jacobian 
   Eigen::Matrix4d T_ee = Eigen::Matrix4d::Identity();
   Eigen::MatrixXd J_full_ee(6, dim_q_);
   env_evaluator_ptr_->forwardKinematics(q, T_ee); // default argument is -1 (EE)
@@ -205,12 +165,11 @@ void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& p
 
   Eigen::MatrixXd J_ee = J_full_ee.block(0, 0, 3, dim_q_);
 
-  //STEP 2 - calculate EE position and attractive force (traslational attract)
+  //STEP 2 - calculate EE position and attractive force (translational attract)
   //the one that from the papar 
   // ---------------------Translational Attractive Force--------------------------
   Eigen::Vector3d ee_pos = T_ee.block<3,1>(0,3);
   Eigen::Vector3d diff = goal_pos_ - ee_pos;
-  //ROS_INFO_STREAM("EE pos: " << ee_pos.transpose() << " goal pos: " << goal_pos_.transpose());
 
   double kp = 2.0;
   double kv = 2.0;
@@ -252,12 +211,12 @@ void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& p
       }
     }
   }
+
   //---------------------Rotational Attractive Force--------------------------
   Eigen::Matrix3d R_ee = T_ee.block<3,3>(0,0);
   Eigen::Quaterniond q_curr(R_ee);
   // To do : get it from topic
   //Eigen::Quaterniond q_goal(0.96593, 0.25882, 0.0, 0.0);
-
   //Eigen::Quaterniond q_goal(1, 0.0, 0.0, 0.0);
 
   double p0 = q_curr.w();

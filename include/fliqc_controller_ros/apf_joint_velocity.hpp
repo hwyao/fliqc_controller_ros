@@ -37,7 +37,6 @@ class APFJointVelocity : public controller_interface::MultiInterfaceController<
   std::vector<hardware_interface::JointHandle> velocity_joint_handles_;
   ros::Duration elapsed_time_;
 
-  std::unique_ptr<FLIQC_controller_core::FLIQC_controller_joint_velocity_basic> controller_ptr_;
   std::unique_ptr<robot_env_evaluator::RobotEnvEvaluator> env_evaluator_ptr_;
 
   int dim_q_; //< The dimension of the joint q 
