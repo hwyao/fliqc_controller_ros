@@ -243,7 +243,7 @@ Visualization Manager:
       Name: TF
       Show Arrows: true
       Show Axes: true
-      Show Names: true
+      Show Names: false
       Tree:
         world:
           panda_link0:
@@ -305,6 +305,14 @@ Visualization Manager:
         env_info_rbt: true
       Queue Size: 100
       Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /controller_result
+      Name: MarkerArray
+      Namespaces:
+        controller_result: true
+      Queue Size: 100
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
@@ -333,7 +341,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 2.3442604541778564
+      Distance: 1.8637746572494507
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -349,9 +357,9 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.5703976154327393
+      Pitch: 0.9053975343704224
       Target Frame: <Fixed Frame>
-      Yaw: 6.203581809997559
+      Yaw: 0.10539619624614716
     Saved: ~
 Window Geometry:
   Displays:

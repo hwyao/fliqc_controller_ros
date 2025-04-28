@@ -85,7 +85,7 @@ bool FLIQCJointVelocityNoEnvNode::init(hardware_interface::RobotHW* robot_hardwa
   READ_PARAM(node_handle, controller_name,
     "/fliqc_controller_core/linear_cost_type", linear_cost_type);
   controller_ptr_->linear_cost_type = static_cast<FLIQC_controller_core::FLIQC_linear_cost_type>(linear_cost_type);
-  READ_PARAM(node_handle, controller_name, 
+  READ_PARAM(node_handle, controller_name,
       "/fliqc_controller_core/lambda_cost_penalty", controller_ptr_->lambda_cost_penalty);
   READ_PARAM(node_handle, controller_name,
       "/fliqc_controller_core/enable_lambda_constraint_in_L", controller_ptr_->enable_lambda_constraint_in_L);
@@ -423,7 +423,7 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
         q_dot_guide_marker.scale.x = 0.005;
         q_dot_guide_marker.scale.y = 0.01;
         q_dot_guide_marker.scale.z = 0.01;
-        q_dot_guide_marker.color.a = 0.6;
+        q_dot_guide_marker.color.a = 0.4;
         q_dot_guide_marker.color.r = 0.0;
         q_dot_guide_marker.color.g = 0.0;
         q_dot_guide_marker.color.b = 1.0;
@@ -549,6 +549,53 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
         obs_pub.publish(obs_marker_array);
       }
     } while(false);
+  #endif // CONTROLLER_DEBUG
+
+  // publish and visualize the controller output information
+  #ifdef CONTROLLER_DEBUG
+  do{
+    static ros::NodeHandle node_handle;
+    static ros::Time last_publish_time = ros::Time::now();
+    if (ros::Time::now() - last_publish_time > ros::Duration(1.0/30) || error_flag_ == true){
+      last_publish_time = ros::Time::now();
+      static ros::Publisher obs_pub;
+      if (!obs_pub){
+        obs_pub = node_handle.advertise<visualization_msgs::MarkerArray>("controller_result", 10);
+      }
+      visualization_msgs::MarkerArray obs_marker_array;
+      geometry_msgs::Point point_helper;
+      
+      Eigen::VectorXd real_EE_velocity = J * q_dot_command;
+      // visualize the real EE velocity
+      visualization_msgs::Marker real_EE_velocity_marker;
+      real_EE_velocity_marker.header.frame_id = "panda_link0";
+      real_EE_velocity_marker.header.stamp = ros::Time::now();
+      real_EE_velocity_marker.ns = "controller_result";
+      real_EE_velocity_marker.id = 1;
+      real_EE_velocity_marker.type = visualization_msgs::Marker::ARROW;
+      real_EE_velocity_marker.action = visualization_msgs::Marker::ADD;
+      point_helper.x = now_(0);
+      point_helper.y = now_(1);
+      point_helper.z = now_(2);
+      real_EE_velocity_marker.points.push_back(point_helper);
+      Eigen::Vector3d real_EE_velocity_end = now_ + real_EE_velocity.head(3);
+      point_helper.x = real_EE_velocity_end(0);
+      point_helper.y = real_EE_velocity_end(1);
+      point_helper.z = real_EE_velocity_end(2);
+      real_EE_velocity_marker.points.push_back(point_helper);
+      real_EE_velocity_marker.pose.orientation.w = 1.0;
+      real_EE_velocity_marker.scale.x = 0.005;
+      real_EE_velocity_marker.scale.y = 0.01;
+      real_EE_velocity_marker.scale.z = 0.01;
+      real_EE_velocity_marker.color.a = 0.9;
+      real_EE_velocity_marker.color.r = 0.0;
+      real_EE_velocity_marker.color.g = 1.0;
+      real_EE_velocity_marker.color.b = 0.0;
+      obs_marker_array.markers.push_back(real_EE_velocity_marker);
+
+      obs_pub.publish(obs_marker_array);
+    }
+  } while(false);
   #endif // CONTROLLER_DEBUG
 
   if (!error_flag_) {
