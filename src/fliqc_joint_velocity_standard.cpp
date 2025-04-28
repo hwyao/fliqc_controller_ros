@@ -77,8 +77,15 @@ bool FLIQCJointVelocityStandard::init(hardware_interface::RobotHW* robot_hardwar
   controller_ptr_->lcqp_solver.updateOptions();
 
   // Get controller parameters: fliqc_controller_core parameters
+  int quad_cost_type, linear_cost_type;
+  READ_PARAM(node_handle, controller_name,
+    "/fliqc_controller_core/quad_cost_type", quad_cost_type);
+  controller_ptr_->quad_cost_type = static_cast<FLIQC_controller_core::FLIQC_quad_cost_type>(quad_cost_type);
+  READ_PARAM(node_handle, controller_name,
+    "/fliqc_controller_core/linear_cost_type", linear_cost_type);
+  controller_ptr_->linear_cost_type = static_cast<FLIQC_controller_core::FLIQC_linear_cost_type>(linear_cost_type);
   READ_PARAM(node_handle, controller_name, 
-      "/fliqc_controller_core/buffer_history", controller_ptr_->buffer_history);
+      "/fliqc_controller_core/lambda_cost_penalty", controller_ptr_->lambda_cost_penalty);
   READ_PARAM(node_handle, controller_name,
       "/fliqc_controller_core/enable_lambda_constraint_in_L", controller_ptr_->enable_lambda_constraint_in_L);
   READ_PARAM(node_handle, controller_name,
@@ -89,6 +96,8 @@ bool FLIQCJointVelocityStandard::init(hardware_interface::RobotHW* robot_hardwar
       "/fliqc_controller_core/enable_esc_vel_constraint", controller_ptr_->enable_esc_vel_constraint);
   READ_PARAM(node_handle, controller_name,
       "/fliqc_controller_core/esc_vel_max", controller_ptr_->esc_vel_max);
+  READ_PARAM(node_handle, controller_name,
+    "/fliqc_controller_core/enable_nullspace_projector_in_A", controller_ptr_->enable_nullspace_projector_in_A);
   READ_PARAM(node_handle, controller_name,
       "/fliqc_controller_core/dt", controller_ptr_->dt);
   READ_PARAM(node_handle, controller_name,
@@ -111,6 +120,14 @@ bool FLIQCJointVelocityStandard::init(hardware_interface::RobotHW* robot_hardwar
   preset->getPresetRobot(model, ee_name_preset, joint_names_preset, collision_model);
 
   env_evaluator_ptr_ = std::make_unique<robot_env_evaluator::RobotEnvEvaluator>(model, ee_name_preset, joint_names_preset, collision_model);
+  READ_PARAM(node_handle, controller_name,
+    "/robot_env_evaluator/calculate_self_collision", env_evaluator_ptr_->calculate_self_collision_);
+  READ_PARAM(node_handle, controller_name,
+    "/robot_env_evaluator/projector_dist_to_control_enable", env_evaluator_ptr_->projector_dist_to_control_enable_);
+  READ_PARAM(node_handle, controller_name,
+    "/robot_env_evaluator/projector_dist_to_control_with_zero_orientation", env_evaluator_ptr_->projector_dist_to_control_with_zero_orientation_);
+  READ_PARAM(node_handle, controller_name,
+    "/robot_env_evaluator/robust_pinv_lambda", env_evaluator_ptr_->robust_pinv_lambda_);
 
   // subscribe to the targeted velocity and goal to distance from the multi-agent system
   targeted_velocity_sub_ = node_handle.subscribe("/agent_twist_global", 1, &FLIQCJointVelocityStandard::targetedVelocityCallback, this);
@@ -195,10 +212,12 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
   DBGNPROF_STOP_CLOCK("computeDistances");
 
   // //distances
-  // for (size_t i = 0; i < distances.size(); i++){
+  // for (size_t i = 0; i < distances.size(); i++) {
   //   ROS_INFO_STREAM("[STEP1]FLIQCJointVelocityStandard: Distance " << i << " is "
-  //       << distances[i].distance << " with projector " << std::endl 
-  //       << distances[i].projector_jointspace_to_dist.transpose());
+  //       << distances[i].distance << "\n"
+  //       << "Contacted Robot Link: " << distances[i].contacted_robot_link << "\n"
+  //       << "Projector Jointspace to Distance: " << distances[i].projector_jointspace_to_dist.transpose() << "\n"
+  //       << "Projector Distance to Jointspace: " << distances[i].projector_dist_to_jointspace.transpose() << "\n");
   // }
 
   DBGNPROF_START_CLOCK;
@@ -225,9 +244,9 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
 
   DBGNPROF_START_CLOCK;
   // Calculate the controller cost input
-  FLIQC_controller_core::FLIQC_cost_input cost_input;
-  cost_input.Q = Eigen::MatrixXd::Identity(dim_q_, dim_q_);
-  cost_input.g = Eigen::VectorXd::Zero(dim_q_);
+  FLIQC_controller_core::FLIQC_state_input state_input;
+  state_input.M;      
+  state_input.J = J;  
 
   // Get the obstacle distance information and convert it as the distance input for the controller
   std::vector<FLIQC_controller_core::FLIQC_distance_input> distance_inputs;
@@ -236,20 +255,21 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
     distance_input.id = i;
     distance_input.distance = distances[i].distance;
     distance_input.projector_control_to_dist = distances[i].projector_jointspace_to_dist.transpose();
+    distance_input.projector_dist_to_control = distances[i].projector_dist_to_jointspace;
     distance_inputs.push_back(distance_input);
   }
   DBGNPROF_STOP_CLOCK("organizeData");
 
-  //debug: distance_inputs
+  // //debug: distance_inputs
   // for (size_t i = 0; i < distance_inputs.size(); ++i){
   //   ROS_INFO_STREAM("[STEP2]FLIQCJointVelocityStandard: Distance " << i << " is " 
-  //       << distance_inputs[i].distance << " with projector " << std::endl << distance_inputs[i].projector_control_to_dist);
+  //       << distance_inputs[i].distance << " with projector " << std::endl << distance_inputs[i].projector_control_to_dist << std::endl
+  //       << "and reverse projector " << std::endl << distance_inputs[i].projector_dist_to_control.transpose());
   // }
 
-  //debug: distance_inputs activated
+  // //debug: distance_inputs activated
   // for (size_t i = 0; i < distance_inputs.size(); ++i){
   //   if (distance_inputs[i].distance < controller_ptr_->active_threshold){
-      
   //     ROS_INFO_STREAM("[STEP2_COND]FLIQCJointVelocityStandard: Distance " << i << " is " 
   //         << distance_inputs[i].distance << " with projector " << std::endl << distance_inputs[i].projector_control_to_dist);
   //   }
@@ -261,7 +281,7 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
   if (!error_flag_){
     try {
       DBGNPROF_START_CLOCK;
-      q_dot_command = controller_ptr_->runController(q_dot_guide, cost_input, distance_inputs);
+      q_dot_command = controller_ptr_->runController(q_dot_guide, state_input, distance_inputs);
       DBGNPROF_STOP_CLOCK("runController");
 
     } catch (const FLIQC_controller_core::LCQPowException& e) {

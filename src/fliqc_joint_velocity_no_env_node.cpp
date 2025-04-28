@@ -78,8 +78,15 @@ bool FLIQCJointVelocityNoEnvNode::init(hardware_interface::RobotHW* robot_hardwa
   controller_ptr_->lcqp_solver.updateOptions();
 
   // Get controller parameters: fliqc_controller_core parameters
+  int quad_cost_type, linear_cost_type;
+  READ_PARAM(node_handle, controller_name,
+    "/fliqc_controller_core/quad_cost_type", quad_cost_type);
+  controller_ptr_->quad_cost_type = static_cast<FLIQC_controller_core::FLIQC_quad_cost_type>(quad_cost_type);
+  READ_PARAM(node_handle, controller_name,
+    "/fliqc_controller_core/linear_cost_type", linear_cost_type);
+  controller_ptr_->linear_cost_type = static_cast<FLIQC_controller_core::FLIQC_linear_cost_type>(linear_cost_type);
   READ_PARAM(node_handle, controller_name, 
-      "/fliqc_controller_core/buffer_history", controller_ptr_->buffer_history);
+      "/fliqc_controller_core/lambda_cost_penalty", controller_ptr_->lambda_cost_penalty);
   READ_PARAM(node_handle, controller_name,
       "/fliqc_controller_core/enable_lambda_constraint_in_L", controller_ptr_->enable_lambda_constraint_in_L);
   READ_PARAM(node_handle, controller_name,
@@ -90,6 +97,8 @@ bool FLIQCJointVelocityNoEnvNode::init(hardware_interface::RobotHW* robot_hardwa
       "/fliqc_controller_core/enable_esc_vel_constraint", controller_ptr_->enable_esc_vel_constraint);
   READ_PARAM(node_handle, controller_name,
       "/fliqc_controller_core/esc_vel_max", controller_ptr_->esc_vel_max);
+  READ_PARAM(node_handle, controller_name,
+      "/fliqc_controller_core/enable_nullspace_projector_in_A", controller_ptr_->enable_nullspace_projector_in_A);
   READ_PARAM(node_handle, controller_name,
       "/fliqc_controller_core/dt", controller_ptr_->dt);
   READ_PARAM(node_handle, controller_name,
@@ -112,6 +121,12 @@ bool FLIQCJointVelocityNoEnvNode::init(hardware_interface::RobotHW* robot_hardwa
   preset->getPresetRobot(model, ee_name_preset, joint_names_preset, collision_model);
 
   env_evaluator_ptr_ = std::make_unique<robot_env_evaluator::RobotEnvEvaluator>(model, ee_name_preset, joint_names_preset, collision_model);
+  READ_PARAM(node_handle, controller_name,
+    "/robot_env_evaluator/calculate_self_collision", env_evaluator_ptr_->calculate_self_collision_);
+  READ_PARAM(node_handle, controller_name,
+    "/robot_env_evaluator/projector_dist_to_control_enable", env_evaluator_ptr_->projector_dist_to_control_enable_);
+  READ_PARAM(node_handle, controller_name,
+    "/robot_env_evaluator/projector_dist_to_control_with_zero_orientation", env_evaluator_ptr_->projector_dist_to_control_with_zero_orientation_);
 
   // simulate virtual dynamic obstacle information
   obsList_.push_back(Eigen::Vector3d(0.25, 0.5, 0.6)); 
@@ -248,9 +263,9 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
 
   DBGNPROF_START_CLOCK;
   // Calculate the controller cost input
-  FLIQC_controller_core::FLIQC_cost_input cost_input;
-  cost_input.Q = Eigen::MatrixXd::Identity(dim_q_, dim_q_);
-  cost_input.g = Eigen::VectorXd::Zero(dim_q_);
+  FLIQC_controller_core::FLIQC_state_input state_input;
+  state_input.M;      //tbd = Eigen::MatrixXd::Identity(dim_q_, dim_q_);
+  state_input.J = J;  //tbd = Eigen::VectorXd::Zero(dim_q_);
 
   // Get the obstacle distance information and convert it as the distance input for the controller
   std::vector<FLIQC_controller_core::FLIQC_distance_input> distance_inputs;
@@ -284,7 +299,7 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
   if (!error_flag_) {
     try {
       DBGNPROF_START_CLOCK;
-      q_dot_command = controller_ptr_->runController(q_dot_guide, cost_input, distance_inputs);
+      q_dot_command = controller_ptr_->runController(q_dot_guide, state_input, distance_inputs);
       DBGNPROF_STOP_CLOCK("runController");
 
     } catch (const FLIQC_controller_core::LCQPowException& e) {
