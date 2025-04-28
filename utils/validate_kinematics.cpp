@@ -85,7 +85,7 @@ int main(int argc, char** argv) {
 
         // Check 1: The forward Kinematics 
         // Publish TF frames
-        int EE_index = 4;
+        int EE_index = -1;
         Eigen::Matrix4d T;
         env_evaluator_ptr_->forwardKinematics(q, T, EE_index);
         publishTFFrame(T, "panda_link0", "EE", tf_broadcaster);
@@ -142,7 +142,10 @@ int main(int argc, char** argv) {
 
         //Eigen::VectorXd q_dot = J.jacobiSvd(Eigen::ComputeThinU | Eigen::ComputeThinV).solve(v);            // pinv with whole Jacobian
         Eigen::VectorXd q_dot = Jpos.jacobiSvd(Eigen::ComputeThinU | Eigen::ComputeThinV).solve(v.head<3>()); // pinv with only position part of Jacobian
-       
+        Eigen::VectorXd q_rotate = Eigen::VectorXd::Zero(7);
+        q_rotate(4) = 0.5; // Rotate around the z-axis
+        q_dot = q_dot + (Eigen::MatrixXd::Identity(7, 7) - Jpos.completeOrthogonalDecomposition().pseudoInverse() * Jpos) * q_rotate;
+
         // Display the joint velocities
         Eigen::VectorXd x_guide = J * q_dot;
 
