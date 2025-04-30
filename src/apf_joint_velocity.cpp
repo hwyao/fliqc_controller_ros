@@ -56,9 +56,10 @@ bool APFJointVelocity::init(hardware_interface::RobotHW* robot_hardware, ros::No
   pinocchio::Model model;
   std::string ee_name_preset;
   std::vector<std::string> joint_names_preset;
-  
   pinocchio::GeometryModel collision_model;
-  auto preset = robot_env_evaluator::RobotPresetFactory::createRobotPreset("panda");
+  std::string robot_preset;
+  READ_PARAM(node_handle, controller_name, "robot_preset", robot_preset);
+  auto preset = robot_env_evaluator::RobotPresetFactory::createRobotPreset(robot_preset);
   CHECK_NOT_EMPTY(controller_name, preset == nullptr);
   preset->getPresetRobot(model, ee_name_preset, joint_names_preset, collision_model);
 

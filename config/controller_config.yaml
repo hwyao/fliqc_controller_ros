@@ -40,6 +40,7 @@ robot_env_evaluator:
 fliqc_joint_velocity_no_env_node:
     type: fliqc_controller_ros/FLIQCJointVelocityNoEnvNode
     arm_id: $(arg arm_id)
+    robot_preset: panda
     joint_names:
         - $(arg arm_id)_joint1
         - $(arg arm_id)_joint2
@@ -52,6 +53,7 @@ fliqc_joint_velocity_no_env_node:
 fliqc_joint_velocity_no_env_node_debug:
     type: fliqc_controller_ros/FLIQCJointVelocityNoEnvNodeDebug
     arm_id: $(arg arm_id)
+    robot_preset: panda
     joint_names:
         - $(arg arm_id)_joint1
         - $(arg arm_id)_joint2
@@ -64,6 +66,7 @@ fliqc_joint_velocity_no_env_node_debug:
 fliqc_joint_velocity_no_env_node_profile:
     type: fliqc_controller_ros/FLIQCJointVelocityNoEnvNodeProfile
     arm_id: $(arg arm_id)
+    robot_preset: panda
     joint_names:
         - $(arg arm_id)_joint1
         - $(arg arm_id)_joint2
@@ -76,6 +79,7 @@ fliqc_joint_velocity_no_env_node_profile:
 fliqc_joint_velocity_standard:
     type: fliqc_controller_ros/FLIQCJointVelocityStandard
     arm_id: $(arg arm_id)
+    robot_preset: panda_no_hand
     joint_names:
         - $(arg arm_id)_joint1
         - $(arg arm_id)_joint2
@@ -88,6 +92,7 @@ fliqc_joint_velocity_standard:
 fliqc_joint_velocity_standard_debug:
     type: fliqc_controller_ros/FLIQCJointVelocityStandardDebug
     arm_id: $(arg arm_id)
+    robot_preset: panda_no_hand
     joint_names:
         - $(arg arm_id)_joint1
         - $(arg arm_id)_joint2
@@ -100,6 +105,7 @@ fliqc_joint_velocity_standard_debug:
 fliqc_joint_velocity_standard_profile:
     type: fliqc_controller_ros/FLIQCJointVelocityStandardProfile
     arm_id: $(arg arm_id)
+    robot_preset: panda_no_hand
     joint_names:
         - $(arg arm_id)_joint1
         - $(arg arm_id)_joint2
@@ -112,6 +118,7 @@ fliqc_joint_velocity_standard_profile:
 apf_joint_velocity:
     type: fliqc_controller_ros/APFJointVelocity
     arm_id: $(arg arm_id)
+    robot_preset: panda
     joint_names:
         - $(arg arm_id)_joint1
         - $(arg arm_id)_joint2
@@ -124,6 +131,7 @@ apf_joint_velocity:
 apf_joint_velocity_debug:
     type: fliqc_controller_ros/APFJointVelocityDebug
     arm_id: $(arg arm_id)
+    robot_preset: panda
     joint_names:
         - $(arg arm_id)_joint1
         - $(arg arm_id)_joint2
