@@ -205,7 +205,7 @@ void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& p
       double dist = diff_ee.norm();
       double real_d = dist - r;
       double d_thresh = 0.2; 
-      if(real_d < d_thresh && real_d>1e-5){
+      if(real_d < d_thresh && real_d>1e-3){
         double k_rep = 1.0;
         double rep_val = k_rep*(1.0/real_d - 1.0/d_thresh)/(real_d*real_d);
         repulsive += rep_val*(diff_ee/dist);
@@ -289,7 +289,7 @@ void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& p
 
   //STEP 4 - calculate the joint velocity command
   // --------------------------------main task + minor task -----------------------------------
-  Eigen::VectorXd dq = dq_main + dq_j3 + dq_ori;
+  Eigen::VectorXd dq = dq_main + dq_j3; // + dq_ori;
 
   if(distance_to_goal_ > 0.01)
   {
