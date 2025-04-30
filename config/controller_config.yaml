@@ -17,9 +17,9 @@ lcqpow:
     penaltyUpdateFactor: 2.0
 
 fliqc_controller_core:
-    quad_cost_type: 0                      # 0: identity, 1: mass matrix
+    quad_cost_type: 1                      # 0: identity, 1: joint_velocity_guide_error, 2: mass matrix (energy)
     linear_cost_type: 0                    # 0: none
-    lambda_cost_penalty: 20000.0
+    lambda_cost_penalty: 1000.0
     enable_lambda_constraint_in_L: false
     enable_lambda_constraint_in_x: true
     lambda_max: 1.7976931348623157E+308
