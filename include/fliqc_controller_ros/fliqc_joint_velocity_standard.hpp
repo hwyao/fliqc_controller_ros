@@ -2,6 +2,7 @@
 
 #include <string>
 #include <vector>
+#include <mutex>
 
 #include <ros/node_handle.h>
 #include <ros/time.h>
@@ -12,15 +13,23 @@
 #include <FLIQC_controller_core/FLIQC_controllers.hpp>
 #include <robot_env_evaluator/robot_env_evaluator.hpp>
 
+#include <std_msgs/Float64.h>
+#include <geometry_msgs/TwistStamped.h>
+#include <moveit_msgs/PlanningScene.h>
+
 namespace fliqc_controller_ros {
 
-class FLIQCJointVelocityNoEnvNode : public controller_interface::MultiInterfaceController<
+class FLIQCJointVelocityStandard : public controller_interface::MultiInterfaceController<
                                            hardware_interface::VelocityJointInterface> {
  public:
   bool init(hardware_interface::RobotHW* robot_hardware, ros::NodeHandle& node_handle) override;
   void update(const ros::Time&, const ros::Duration& period) override;
   void starting(const ros::Time&) override;
   void stopping(const ros::Time&) override;
+
+  void planningSceneCallback(const moveit_msgs::PlanningScene::ConstPtr& msg);
+  void targetedVelocityCallback(const geometry_msgs::TwistStamped::ConstPtr& msg);
+  void distanceToGoalCallback(const std_msgs::Float64::ConstPtr& msg);
 
  private:
   std::vector<hardware_interface::JointHandle> velocity_joint_handles_;
@@ -31,9 +40,21 @@ class FLIQCJointVelocityNoEnvNode : public controller_interface::MultiInterfaceC
 
   int dim_q_;                          ///< The dimension of the joint q 
 
-  // simulated obstacle list
-  std::vector<Eigen::Vector3d> obsList_;   
-  std::vector<double> obsRadiusList_; 
+  // the obstacle list
+  std::vector<robot_env_evaluator::obstacleInput> obstacles_;
+
+  // the subscriber list
+  ros::Subscriber targeted_velocity_sub_;
+  ros::Subscriber dist_to_goal_sub_;
+  ros::Subscriber planning_scene_sub_;
+
+  // the subscriber variables, targeted velocity and distance to goal
+  Eigen::Vector3d targeted_velocity_ = Eigen::Vector3d::Zero(); 
+  double distance_to_goal_ = 100.0;
+  bool first_receive_obstacle_ = false;
+
+  // the mutex for the obstacles
+  std::mutex obstacles_mutex_;
 
   // error flag
   bool error_flag_ = false;

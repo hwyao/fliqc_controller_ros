@@ -11,26 +11,36 @@ joint_velocity_example_controller:
         - $(arg arm_id)_joint7
 
 lcqpow:
-    complementarityTolerance: 2.221E-13
-    stationarityTolerance: 2.221E-10
+    complementarityTolerance: 2.221E-6
+    stationarityTolerance: 2.221E-4
     initialPenaltyParameter: 0.01
     penaltyUpdateFactor: 2.0
 
 fliqc_controller_core:
-    buffer_history: false
+    quad_cost_type: 1                      # 0: identity, 1: joint_velocity_guide_error, 2: mass matrix (energy)
+    linear_cost_type: 0                    # 0: none
+    lambda_cost_penalty: 1000.0
     enable_lambda_constraint_in_L: false
     enable_lambda_constraint_in_x: true
     lambda_max: 1.7976931348623157E+308
     enable_esc_vel_constraint: false
     esc_vel_max: 1.7976931348623157E+308
-    dt: 0.02
+    enable_nullspace_projector_in_A: true
+    dt: 0.06
     eps: 0.01
-    active_threshold: 0.03
+    active_threshold: 0.04
     q_dot_max: [2.1750, 2.1750, 2.1750, 2.1750, 2.6100, 2.6100, 2.6100]   # [rad/s]
+
+robot_env_evaluator:
+    calculate_self_collision: false
+    projector_dist_to_control_enable: true
+    projector_dist_to_control_with_zero_orientation: false
+    robust_pinv_lambda: 0.001
 
 fliqc_joint_velocity_no_env_node:
     type: fliqc_controller_ros/FLIQCJointVelocityNoEnvNode
     arm_id: $(arg arm_id)
+    robot_preset: panda
     joint_names:
         - $(arg arm_id)_joint1
         - $(arg arm_id)_joint2
@@ -43,6 +53,85 @@ fliqc_joint_velocity_no_env_node:
 fliqc_joint_velocity_no_env_node_debug:
     type: fliqc_controller_ros/FLIQCJointVelocityNoEnvNodeDebug
     arm_id: $(arg arm_id)
+    robot_preset: panda
+    joint_names:
+        - $(arg arm_id)_joint1
+        - $(arg arm_id)_joint2
+        - $(arg arm_id)_joint3
+        - $(arg arm_id)_joint4
+        - $(arg arm_id)_joint5
+        - $(arg arm_id)_joint6
+        - $(arg arm_id)_joint7
+
+fliqc_joint_velocity_no_env_node_profile:
+    type: fliqc_controller_ros/FLIQCJointVelocityNoEnvNodeProfile
+    arm_id: $(arg arm_id)
+    robot_preset: panda
+    joint_names:
+        - $(arg arm_id)_joint1
+        - $(arg arm_id)_joint2
+        - $(arg arm_id)_joint3
+        - $(arg arm_id)_joint4
+        - $(arg arm_id)_joint5
+        - $(arg arm_id)_joint6
+        - $(arg arm_id)_joint7
+
+fliqc_joint_velocity_standard:
+    type: fliqc_controller_ros/FLIQCJointVelocityStandard
+    arm_id: $(arg arm_id)
+    robot_preset: panda_no_hand
+    joint_names:
+        - $(arg arm_id)_joint1
+        - $(arg arm_id)_joint2
+        - $(arg arm_id)_joint3
+        - $(arg arm_id)_joint4
+        - $(arg arm_id)_joint5
+        - $(arg arm_id)_joint6
+        - $(arg arm_id)_joint7
+
+fliqc_joint_velocity_standard_debug:
+    type: fliqc_controller_ros/FLIQCJointVelocityStandardDebug
+    arm_id: $(arg arm_id)
+    robot_preset: panda_no_hand
+    joint_names:
+        - $(arg arm_id)_joint1
+        - $(arg arm_id)_joint2
+        - $(arg arm_id)_joint3
+        - $(arg arm_id)_joint4
+        - $(arg arm_id)_joint5
+        - $(arg arm_id)_joint6
+        - $(arg arm_id)_joint7
+
+fliqc_joint_velocity_standard_profile:
+    type: fliqc_controller_ros/FLIQCJointVelocityStandardProfile
+    arm_id: $(arg arm_id)
+    robot_preset: panda_no_hand
+    joint_names:
+        - $(arg arm_id)_joint1
+        - $(arg arm_id)_joint2
+        - $(arg arm_id)_joint3
+        - $(arg arm_id)_joint4
+        - $(arg arm_id)_joint5
+        - $(arg arm_id)_joint6
+        - $(arg arm_id)_joint7
+
+apf_joint_velocity:
+    type: fliqc_controller_ros/APFJointVelocity
+    arm_id: $(arg arm_id)
+    robot_preset: panda
+    joint_names:
+        - $(arg arm_id)_joint1
+        - $(arg arm_id)_joint2
+        - $(arg arm_id)_joint3
+        - $(arg arm_id)_joint4
+        - $(arg arm_id)_joint5
+        - $(arg arm_id)_joint6
+        - $(arg arm_id)_joint7
+
+apf_joint_velocity_debug:
+    type: fliqc_controller_ros/APFJointVelocityDebug
+    arm_id: $(arg arm_id)
+    robot_preset: panda
     joint_names:
         - $(arg arm_id)_joint1
         - $(arg arm_id)_joint2

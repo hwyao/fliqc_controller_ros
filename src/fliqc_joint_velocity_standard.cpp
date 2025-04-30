@@ -2,13 +2,14 @@
 #include <pinocchio/parsers/srdf.hpp>
 #include <pinocchio/algorithm/model.hpp>
 
-#include "fliqc_controller_ros/fliqc_joint_velocity_no_env_node.hpp"
+#include "fliqc_controller_ros/fliqc_joint_velocity_standard.hpp"
 #include "fliqc_controller_ros/helpers.hpp"
 #include <robot_env_evaluator/robot_env_evaluator_path.h>
 #include <robot_env_evaluator/robot_presets.hpp>
 
 #include <cmath>
 #include <array>
+#include <mutex>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -16,10 +17,10 @@
 
 #include <ros/ros.h>
 #include <ros/package.h>
+#include <pluginlib/class_list_macros.h>
 #include <controller_interface/controller_base.h>
 #include <hardware_interface/hardware_interface.h>
 #include <hardware_interface/joint_command_interface.h>
-#include <pluginlib/class_list_macros.h>
 
 #ifdef CONTROLLER_DEBUG
 #include <visualization_msgs/MarkerArray.h>
@@ -38,12 +39,10 @@
 namespace fliqc_controller_ros {
 
 // Set the variables for this controller
-static std::string controller_name = "FLIQCJointVelocityNoEnvNode";
+static std::string controller_name = "FLIQCJointVelocityStandard";
 
-bool FLIQCJointVelocityNoEnvNode::init(hardware_interface::RobotHW* robot_hardware,
+bool FLIQCJointVelocityStandard::init(hardware_interface::RobotHW* robot_hardware,
                                                    ros::NodeHandle& node_handle) {
-  // Set the variables for this controller
-                                            
   // Get robot arm id, joint names and EE names parameters
   std::string arm_id;
   READ_PARAM(node_handle, controller_name, "arm_id", arm_id);
@@ -98,7 +97,7 @@ bool FLIQCJointVelocityNoEnvNode::init(hardware_interface::RobotHW* robot_hardwa
   READ_PARAM(node_handle, controller_name,
       "/fliqc_controller_core/esc_vel_max", controller_ptr_->esc_vel_max);
   READ_PARAM(node_handle, controller_name,
-      "/fliqc_controller_core/enable_nullspace_projector_in_A", controller_ptr_->enable_nullspace_projector_in_A);
+    "/fliqc_controller_core/enable_nullspace_projector_in_A", controller_ptr_->enable_nullspace_projector_in_A);
   READ_PARAM(node_handle, controller_name,
       "/fliqc_controller_core/dt", controller_ptr_->dt);
   READ_PARAM(node_handle, controller_name,
@@ -129,115 +128,98 @@ bool FLIQCJointVelocityNoEnvNode::init(hardware_interface::RobotHW* robot_hardwa
     "/robot_env_evaluator/projector_dist_to_control_enable", env_evaluator_ptr_->projector_dist_to_control_enable_);
   READ_PARAM(node_handle, controller_name,
     "/robot_env_evaluator/projector_dist_to_control_with_zero_orientation", env_evaluator_ptr_->projector_dist_to_control_with_zero_orientation_);
+  READ_PARAM(node_handle, controller_name,
+    "/robot_env_evaluator/robust_pinv_lambda", env_evaluator_ptr_->robust_pinv_lambda_);
 
-  // simulate virtual dynamic obstacle information
-  obsList_.push_back(Eigen::Vector3d(0.25, 0.5, 0.6)); 
-  obsRadiusList_.push_back(0.05);
-  obsList_.push_back(Eigen::Vector3d(-0.13, -0.52, 0.5)); 
-  obsRadiusList_.push_back(0.1);
-  obsList_.push_back(Eigen::Vector3d(0.25, 0.3, 0.6)); 
-  obsRadiusList_.push_back(0.05);
-  obsList_.push_back(Eigen::Vector3d(0.30, 0.3, 0.6));
-  obsRadiusList_.push_back(0.05); 
+  // subscribe to the targeted velocity and goal to distance from the multi-agent system
+  targeted_velocity_sub_ = node_handle.subscribe("/agent_twist_global", 1, &FLIQCJointVelocityStandard::targetedVelocityCallback, this);
+  dist_to_goal_sub_ = node_handle.subscribe("/distance_to_goal", 1, &FLIQCJointVelocityStandard::distanceToGoalCallback, this);
 
-  // Initialize the error flag
+  // subscribe to the planning scene information and wait for the first received message
+  planning_scene_sub_ = node_handle.subscribe("/planning_scene", 1, &FLIQCJointVelocityStandard::planningSceneCallback, this);
+
+  // clear and warm up the data until the controller started
+  ROS_INFO_STREAM(controller_name << ": Controller starting...");
   error_flag_ = false;
+  targeted_velocity_ = Eigen::Vector3d::Zero();
+  distance_to_goal_ = 100.0;
+  first_receive_obstacle_ = false;
+  obstacles_.clear();
+
+  // wait until first message received from all subscribers
+  ros::Rate rate(10);
+  while (ros::ok() && (!first_receive_obstacle_)) {
+      ROS_INFO_STREAM_THROTTLE(1, controller_name << ": Waiting for scene messages...");
+      ros::spinOnce();
+      rate.sleep();
+  }
+  ROS_INFO_STREAM(controller_name << ": Controller started.");
 
   return true;
 }
 
-void FLIQCJointVelocityNoEnvNode::starting(const ros::Time& /* time */) {
+void FLIQCJointVelocityStandard::starting(const ros::Time& /* time */) {
   elapsed_time_ = ros::Duration(0.0);
 }
 
-void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
+void FLIQCJointVelocityStandard::planningSceneCallback(const moveit_msgs::PlanningScene::ConstPtr& msg) {
+  std::lock_guard<std::mutex> lock(obstacles_mutex_);
+  obstacles_.clear();
+  for (const auto& obj : msg->world.collision_objects) {
+      if (obj.primitives.empty()){
+        ROS_WARN_STREAM("The object " << obj.id << " in PlanningScene has no primitive.");
+        continue;
+      }
+
+      const auto& pose = obj.primitive_poses[0];
+      Eigen::Matrix4d pose_mat = Eigen::Matrix4d::Identity();
+      pose_mat.block<3, 1>(0, 3) = Eigen::Vector3d(pose.position.x, pose.position.y, pose.position.z);
+      pose_mat.block<3, 3>(0, 0) = Eigen::Quaterniond(pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z).toRotationMatrix();
+
+      if (obj.primitives[0].type == shape_msgs::SolidPrimitive::SPHERE){
+        obstacles_.push_back({coal::Sphere(obj.primitives[0].dimensions[0]), pose_mat});
+      }
+      else{
+        ROS_ERROR_STREAM("The obstacle type " << obj.primitives[0].type << "of object " << obj.id << " is not supported.");
+      }
+  }
+
+  if(first_receive_obstacle_ == false){ first_receive_obstacle_ = true; }
+}
+
+void FLIQCJointVelocityStandard::targetedVelocityCallback(const geometry_msgs::TwistStamped::ConstPtr& msg) {
+  targeted_velocity_ = Eigen::Vector3d(msg->twist.linear.x, msg->twist.linear.y, msg->twist.linear.z);
+}
+
+void FLIQCJointVelocityStandard::distanceToGoalCallback(const std_msgs::Float64::ConstPtr& msg) {
+  distance_to_goal_ = msg->data;
+}
+
+void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
                                             const ros::Duration& period) {
   elapsed_time_ += period;
 
-  // simulate virutal dynamic obstacle information
-  static int phase = 1;
-  if (phase == 1){
-    obsList_[1] = obsList_[1] + Eigen::Vector3d(0, 0.10 * 0.001, 0);
-    if (obsList_[1](1) > - 0.1){
-        phase = 2;
-    }
-  }
-  else{
-    obsList_[1] = obsList_[1] + Eigen::Vector3d(0, -0.05 * 0.001, 0);
-    obsList_[2] = obsList_[2] + Eigen::Vector3d(0, -0.05 * 0.001, 0);
-    obsList_[0] = obsList_[0] + Eigen::Vector3d(0, -0.05 * 0.001, 0);
-    obsList_[3] = obsList_[3] + Eigen::Vector3d(0, -0.05 * 0.001, 0);
-  }
-
   // collect the obstacle information. In this file, we make up our own obstacle information
   Eigen::VectorXd q = Eigen::VectorXd::Zero(dim_q_);
-  std::vector<robot_env_evaluator::obstacleInput> obstacles;
   std::vector<robot_env_evaluator::distanceResult> distances;
   for (size_t i = 0; i < dim_q_; ++i) {
     q(i) = velocity_joint_handles_[i].getPosition();
   }
-  for (size_t i = 0; i < obsList_.size(); ++i){
-    coal::Sphere sphere(obsRadiusList_[i]);
-    Eigen::Matrix4d pose = Eigen::Matrix4d::Identity();
-    pose << 1, 0, 0, obsList_[i](0),
-            0, 1, 0, obsList_[i](1),
-            0, 0, 1, obsList_[i](2),
-            0, 0, 0, 1;
-    obstacles.push_back({sphere, pose});
-  }
   
-  // publish and visualize the obstacles made by this controller
-  #ifdef CONTROLLER_DEBUG
-  // make a publisher for the obstacle, do it in 30Hz
-  do{
-    static ros::NodeHandle node_handle;
-    static ros::Time last_publish_time = ros::Time::now();
-    if (ros::Time::now() - last_publish_time > ros::Duration(1.0/30)){
-      last_publish_time = ros::Time::now();
-      static ros::Publisher obs_pub;
-      if (!obs_pub){
-        obs_pub = node_handle.advertise<visualization_msgs::MarkerArray>("obstacles", 10);
-      }
-      // publish the obstacle
-      visualization_msgs::MarkerArray obs_marker_array;
-      for (size_t i = 0; i < obsList_.size(); ++i){
-        visualization_msgs::Marker obs_marker;
-        obs_marker.header.frame_id = "panda_link0";
-        obs_marker.header.stamp = ros::Time::now();
-        obs_marker.ns = "obstacle";
-        obs_marker.id = i;
-        obs_marker.type = visualization_msgs::Marker::SPHERE;
-        obs_marker.action = visualization_msgs::Marker::ADD;
-        obs_marker.pose.position.x = obsList_[i](0);
-        obs_marker.pose.position.y = obsList_[i](1);
-        obs_marker.pose.position.z = obsList_[i](2);
-        obs_marker.pose.orientation.x = 0.0;
-        obs_marker.pose.orientation.y = 0.0;
-        obs_marker.pose.orientation.z = 0.0;
-        obs_marker.pose.orientation.w = 1.0;
-        obs_marker.scale.x = 2 * obsRadiusList_[i];
-        obs_marker.scale.y = 2 * obsRadiusList_[i];
-        obs_marker.scale.z = 2 * obsRadiusList_[i];
-        obs_marker.color.a = 1.0;
-        obs_marker.color.r = 0.0;
-        obs_marker.color.g = 0.0;
-        obs_marker.color.b = 1.0;
-        obs_marker_array.markers.push_back(obs_marker);
-      }
-      obs_pub.publish(obs_marker_array);
-    }
-  } while(false);
-  #endif // CONTROLLER_DEBUG
-
   DBGNPROF_START_CLOCK; 
-  env_evaluator_ptr_ -> computeDistances(q, obstacles, distances);
+  {
+    std::lock_guard<std::mutex> lock(obstacles_mutex_);
+    env_evaluator_ptr_->computeDistances(q, obstacles_, distances);
+  }
   DBGNPROF_STOP_CLOCK("computeDistances");
 
   // //distances
-  // for (size_t i = 0; i < distances.size(); i++){
-  //   ROS_INFO_STREAM("[STEP1]FLIQCJointVelocityNoEnvNode: Distance " << i << " is "
-  //       << distances[i].distance << " with projector " << std::endl 
-  //       << distances[i].projector_jointspace_to_dist.transpose());
+  // for (size_t i = 0; i < distances.size(); i++) {
+  //   ROS_INFO_STREAM("[STEP1]FLIQCJointVelocityStandard: Distance " << i << " is "
+  //       << distances[i].distance << "\n"
+  //       << "Contacted Robot Link: " << distances[i].contacted_robot_link << "\n"
+  //       << "Projector Jointspace to Distance: " << distances[i].projector_jointspace_to_dist.transpose() << "\n"
+  //       << "Projector Distance to Jointspace: " << distances[i].projector_dist_to_jointspace.transpose() << "\n");
   // }
 
   DBGNPROF_START_CLOCK;
@@ -249,9 +231,8 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
   env_evaluator_ptr_ -> forwardKinematics(q, T);
   env_evaluator_ptr_ -> jacobian(q, J);
 
-  Eigen::Vector3d goal_(0.1, 0.450, 0.55);
   Eigen::Vector3d now_ = T.block<3, 1>(0, 3);
-  Eigen::Vector3d goal_diff = goal_ - now_;
+  Eigen::Vector3d goal_diff = targeted_velocity_;
   Eigen::Vector3d goal_diff_regularized = goal_diff;
   double vel = 0.05;
   if (goal_diff_regularized.norm() > (vel/0.5)){
@@ -266,8 +247,8 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
   DBGNPROF_START_CLOCK;
   // Calculate the controller cost input
   FLIQC_controller_core::FLIQC_state_input state_input;
-  state_input.M;      //tbd = Eigen::MatrixXd::Identity(dim_q_, dim_q_);
-  state_input.J = J;  //tbd = Eigen::VectorXd::Zero(dim_q_);
+  state_input.M;      
+  state_input.J = J;  
 
   // Get the obstacle distance information and convert it as the distance input for the controller
   std::vector<FLIQC_controller_core::FLIQC_distance_input> distance_inputs;
@@ -276,29 +257,30 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
     distance_input.id = i;
     distance_input.distance = distances[i].distance;
     distance_input.projector_control_to_dist = distances[i].projector_jointspace_to_dist.transpose();
+    distance_input.projector_dist_to_control = distances[i].projector_dist_to_jointspace;
     distance_inputs.push_back(distance_input);
   }
   DBGNPROF_STOP_CLOCK("organizeData");
 
   // //debug: distance_inputs
   // for (size_t i = 0; i < distance_inputs.size(); ++i){
-  //   ROS_INFO_STREAM("[STEP2]FLIQCJointVelocityNoEnvNode: Distance " << i << " is " 
-  //       << distance_inputs[i].distance << " with projector " << std::endl << distance_inputs[i].projector_control_to_dist);
+  //   ROS_INFO_STREAM("[STEP2]FLIQCJointVelocityStandard: Distance " << i << " is " 
+  //       << distance_inputs[i].distance << " with projector " << std::endl << distance_inputs[i].projector_control_to_dist << std::endl
+  //       << "and reverse projector " << std::endl << distance_inputs[i].projector_dist_to_control.transpose());
   // }
 
-  //debug: distance_inputs activated
+  // //debug: distance_inputs activated
   // for (size_t i = 0; i < distance_inputs.size(); ++i){
   //   if (distance_inputs[i].distance < controller_ptr_->active_threshold){
-      
-  //     ROS_INFO_STREAM("[STEP2_COND]FLIQCJointVelocityNoEnvNode: Distance " << i << " is " 
+  //     ROS_INFO_STREAM("[STEP2_COND]FLIQCJointVelocityStandard: Distance " << i << " is " 
   //         << distance_inputs[i].distance << " with projector " << std::endl << distance_inputs[i].projector_control_to_dist);
   //   }
   // }
 
-  // run the controller
   Eigen::VectorXd q_dot_command;
 
-  if (!error_flag_) {
+  // run the controller
+  if (!error_flag_){
     try {
       DBGNPROF_START_CLOCK;
       q_dot_command = controller_ptr_->runController(q_dot_guide, state_input, distance_inputs);
@@ -307,7 +289,7 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
     } catch (const FLIQC_controller_core::LCQPowException& e) {
       error_flag_ = true;
       ROS_ERROR_STREAM_ONCE(controller_name << ": LCQPowException caught during runController:\n" << e.what());
-
+  
       try {
         // Get the root path of the package using rospack
         std::string package_path = ros::package::getPath("fliqc_controller_ros");
@@ -315,11 +297,11 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
           ROS_ERROR_STREAM("Failed to find package path for fliqc_controller_ros.");
           throw std::runtime_error("Package path not found.");
         }
-
+  
         // Create the log directory if it doesn't exist
         std::string log_dir = package_path + "/log";
         std::filesystem::create_directories(log_dir);
-
+  
         // Create a subdirectory with the current time
         auto now = std::chrono::system_clock::now();
         auto time_t_now = std::chrono::system_clock::to_time_t(now);
@@ -327,19 +309,19 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
         time_stream << std::put_time(std::localtime(&time_t_now), "%Y-%m-%d_%H-%M-%S-%Z");
         std::string base_dir = log_dir + "/" + time_stream.str() + "_" + controller_name;
         std::filesystem::create_directories(base_dir);
-
+  
         // Create subdirectories for different types of logs
         FLIQC_controller_core::logLCQPowExceptionAsFile(e, base_dir);
-
+  
       } catch (const std::exception& ex) {
         ROS_ERROR_STREAM("Failed to save exception to log: " << ex.what());
       }
     } catch (const std::exception& e) {
       error_flag_ = true;
-      ROS_ERROR_STREAM_ONCE(controller_name << ": std::exception caught during runController:\n" << e.what());
+      ROS_ERROR_STREAM(controller_name << ": std::exception caught during runController:\n" << e.what());
     } catch (...) {
       error_flag_ = true;
-      ROS_ERROR_STREAM_ONCE(controller_name << ": Unknown exception caught during runController.");
+      ROS_ERROR_STREAM(controller_name << ": Unknown exception caught during runController.");
     }
   }
 
@@ -348,7 +330,7 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
   do{
     static ros::NodeHandle node_handle;
     static ros::Time last_publish_time = ros::Time::now();
-    if (ros::Time::now() - last_publish_time > ros::Duration(1.0/30)|| error_flag_ == true){
+    if (ros::Time::now() - last_publish_time > ros::Duration(1.0/30) || error_flag_ == true){
       last_publish_time = ros::Time::now();
       static ros::Publisher obs_pub;
       if (!obs_pub){
@@ -356,27 +338,6 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
       }
       visualization_msgs::MarkerArray obs_marker_array;
       geometry_msgs::Point point_helper;
-        // The goal position
-        visualization_msgs::Marker goal_marker;
-        goal_marker.header.frame_id = "panda_link0";
-        goal_marker.header.stamp = ros::Time::now();
-        goal_marker.ns = "controller_info";
-        goal_marker.id = 0;
-        goal_marker.type = visualization_msgs::Marker::SPHERE;
-        goal_marker.action = visualization_msgs::Marker::ADD;
-        goal_marker.pose.position.x = goal_(0);
-        goal_marker.pose.position.y = goal_(1);
-        goal_marker.pose.position.z = goal_(2);
-        goal_marker.pose.orientation.w = 1.0;
-        goal_marker.scale.x = 0.01;
-        goal_marker.scale.y = 0.01;
-        goal_marker.scale.z = 0.01;
-        goal_marker.color.a = 1.0;
-        goal_marker.color.r = 1.0;
-        goal_marker.color.g = 0.0;
-        goal_marker.color.b = 0.0;
-        obs_marker_array.markers.push_back(goal_marker);
-
         // The current EE position
         visualization_msgs::Marker diff_arrow;
         diff_arrow.header.frame_id = "panda_link0";
@@ -434,13 +395,13 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
     }
   } while(false);
   #endif // CONTROLLER_DEBUG
-
+  
   // publish and visualize the world enviroment calculation information
   #ifdef CONTROLLER_DEBUG
     do{
       static ros::NodeHandle node_handle;
       static ros::Time last_publish_time = ros::Time::now();
-      if (ros::Time::now() - last_publish_time > ros::Duration(1.0/30)|| error_flag_ == true){
+      if (ros::Time::now() - last_publish_time > ros::Duration(1.0/30) || error_flag_ == true){
         last_publish_time = ros::Time::now();
         static ros::Publisher obs_pub;
         if (!obs_pub){
@@ -567,7 +528,7 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
       visualization_msgs::MarkerArray obs_marker_array;
       geometry_msgs::Point point_helper;
       
-      Eigen::VectorXd real_EE_velocity = J * q_dot_command;
+      Eigen::Vector3d real_EE_velocity = J * q_dot_command;
       // visualize the real EE velocity
       visualization_msgs::Marker real_EE_velocity_marker;
       real_EE_velocity_marker.header.frame_id = "panda_link0";
@@ -595,6 +556,24 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
       real_EE_velocity_marker.color.b = 0.0;
       obs_marker_array.markers.push_back(real_EE_velocity_marker);
 
+      visualization_msgs::Marker real_EE_velocity_marker_rotation = real_EE_velocity_marker;
+      real_EE_velocity_marker_rotation.id = 2;
+      real_EE_velocity_marker_rotation.points.clear();
+      point_helper.x = now_(0);
+      point_helper.y = now_(1);
+      point_helper.z = now_(2);
+      real_EE_velocity_marker_rotation.points.push_back(point_helper);
+      Eigen::Vector3d real_EE_velocity_end_rotation = now_ + real_EE_velocity.tail(3);
+      point_helper.x = real_EE_velocity_end_rotation(0);
+      point_helper.y = real_EE_velocity_end_rotation(1);
+      point_helper.z = real_EE_velocity_end_rotation(2);
+      real_EE_velocity_marker_rotation.points.push_back(point_helper);
+      real_EE_velocity_marker.scale.x = 0.003;
+      real_EE_velocity_marker.color.g = 1.0;
+      real_EE_velocity_marker.color.b = 1.0;
+      obs_marker_array.markers.push_back(real_EE_velocity_marker_rotation);
+      
+      // visualize the goal velocity
       obs_pub.publish(obs_marker_array);
     }
   } while(false);
@@ -616,7 +595,7 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
   }
 }
 
-void FLIQCJointVelocityNoEnvNode::stopping(const ros::Time& /*time*/) {
+void FLIQCJointVelocityStandard::stopping(const ros::Time& /*time*/) {
   // WARNING: DO NOT SEND ZERO VELOCITIES HERE AS IN CASE OF ABORTING DURING MOTION
   // A JUMP TO ZERO WILL BE COMMANDED PUTTING HIGH LOADS ON THE ROBOT. LET THE DEFAULT
   // BUILT-IN STOPPING BEHAVIOR SLOW DOWN THE ROBOT.
@@ -624,5 +603,5 @@ void FLIQCJointVelocityNoEnvNode::stopping(const ros::Time& /*time*/) {
 
 }  // namespace fliqc_controller_ros
 
-PLUGINLIB_EXPORT_CLASS(fliqc_controller_ros::FLIQCJointVelocityNoEnvNode,
+PLUGINLIB_EXPORT_CLASS(fliqc_controller_ros::FLIQCJointVelocityStandard,
                        controller_interface::ControllerBase)
