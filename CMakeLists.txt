@@ -10,6 +10,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
   roscpp
+  roslib
   controller_interface
   hardware_interface
   pluginlib
@@ -17,6 +18,8 @@ find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
   moveit_msgs
   std_msgs
+  debug_and_profile_helper
+  tf2_ros # Add tf2_ros here
 )
 
 ## System dependencies are found with CMake's conventions
@@ -55,11 +58,12 @@ include_directories(
   ${catkin_INCLUDE_DIRS}
 )
 
-## Declare a C++ library
+## Declare a C++ library for default controller
 add_library(fliqc_controller_ros
   src/joint_velocity_example_controller.cpp
   src/fliqc_joint_velocity_no_env_node.cpp
   src/fliqc_joint_velocity_standard.cpp
+  src/apf_joint_velocity.cpp
 )
 target_compile_features(fliqc_controller_ros PUBLIC 
     cxx_std_17
@@ -70,14 +74,15 @@ target_link_libraries(fliqc_controller_ros PUBLIC
   robot_env_evaluator
 )
 
-
+## Declare a C++ library for debug controller
 add_library(fliqc_controller_ros_debug
   src/joint_velocity_example_controller.cpp
   src/fliqc_joint_velocity_no_env_node.cpp
   src/fliqc_joint_velocity_standard.cpp
+  src/apf_joint_velocity.cpp
 )
 target_compile_features(fliqc_controller_ros_debug PUBLIC 
-    cxx_std_17                                                # requires CMake 3.8
+    cxx_std_17                                               
 )
 target_link_libraries(fliqc_controller_ros_debug PUBLIC
   ${catkin_LIBRARIES}
@@ -86,6 +91,31 @@ target_link_libraries(fliqc_controller_ros_debug PUBLIC
 )
 target_compile_definitions(fliqc_controller_ros_debug PUBLIC 
   CONTROLLER_DEBUG
+)
+
+## Declare a C++ library for profile controller
+add_library(fliqc_controller_ros_profile
+  src/fliqc_joint_velocity_no_env_node.cpp
+  src/fliqc_joint_velocity_standard.cpp
+)
+target_compile_features(fliqc_controller_ros_profile PUBLIC 
+    cxx_std_17
+)
+target_link_libraries(fliqc_controller_ros_profile PUBLIC
+  ${catkin_LIBRARIES}
+  FLIQC_controller_core
+  robot_env_evaluator
+)
+target_compile_definitions(fliqc_controller_ros_profile PUBLIC 
+  CONTROLLER_PROFILE
+)
+
+## Declare a C++ executable for the utils
+add_executable(validate_kinematics utils/validate_kinematics.cpp)
+target_compile_features(validate_kinematics PUBLIC cxx_std_17)
+target_link_libraries(validate_kinematics PUBLIC
+  ${catkin_LIBRARIES}
+  robot_env_evaluator
 )
 
 ## Add cmake target dependencies of the library
@@ -122,10 +152,10 @@ target_compile_definitions(fliqc_controller_ros_debug PUBLIC
 
 ## Mark executable scripts (Python etc.) for installation
 ## in contrast to setup.py, you can choose the destination
-# catkin_install_python(PROGRAMS
-#   scripts/my_python_script
-#   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-# )
+catkin_install_python(PROGRAMS
+  scripts/launch_simulation.py
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
 
 ## Mark executables for installation
 ## See http://docs.ros.org/melodic/api/catkin/html/howto/format1/building_executables.html

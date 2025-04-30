@@ -14,4 +14,9 @@
           The joint velocity controller based on FLIQC planner with standard configuration.
       </description>
   </class>
+  <class name="fliqc_controller_ros/APFJointVelocity" type="fliqc_controller_ros::APFJointVelocity" base_class_type="controller_interface::ControllerBase">
+      <description>
+          The joint velocity controller based on artifical potential field as ablation study.
+      </description>
+  </class>
 </library>
