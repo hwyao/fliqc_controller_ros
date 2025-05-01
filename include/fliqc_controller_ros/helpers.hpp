@@ -25,7 +25,7 @@
 #define CATCH_BLOCK(controller_name, action_block) \
   try { \
     action_block \
-  } catch (const hardware_interface::HardwareInterfaceException& ex) {  \
+  } catch (const std::exception& ex) {  \
     ROS_ERROR_STREAM(controller_name << ": Exception when executing\n" << #action_block << "\n" << ex.what());  \
     return false;  \
   }
