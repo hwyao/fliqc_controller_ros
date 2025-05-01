@@ -13,13 +13,14 @@ find_package(catkin REQUIRED COMPONENTS
   roslib
   controller_interface
   hardware_interface
+  franka_hw
   pluginlib
   visualization_msgs
   geometry_msgs
   moveit_msgs
   std_msgs
   debug_and_profile_helper
-  tf2_ros # Add tf2_ros here
+  tf2_ros 
 )
 
 ## System dependencies are found with CMake's conventions
@@ -64,6 +65,7 @@ add_library(fliqc_controller_ros
   src/fliqc_joint_velocity_no_env_node.cpp
   src/fliqc_joint_velocity_standard.cpp
   src/apf_joint_velocity.cpp
+  src/fliqc_state_source_bridge.cpp
 )
 target_compile_features(fliqc_controller_ros PUBLIC 
     cxx_std_17
@@ -80,6 +82,7 @@ add_library(fliqc_controller_ros_debug
   src/fliqc_joint_velocity_no_env_node.cpp
   src/fliqc_joint_velocity_standard.cpp
   src/apf_joint_velocity.cpp
+  src/fliqc_state_source_bridge.cpp
 )
 target_compile_features(fliqc_controller_ros_debug PUBLIC 
     cxx_std_17                                               
@@ -97,6 +100,7 @@ target_compile_definitions(fliqc_controller_ros_debug PUBLIC
 add_library(fliqc_controller_ros_profile
   src/fliqc_joint_velocity_no_env_node.cpp
   src/fliqc_joint_velocity_standard.cpp
+  src/fliqc_state_source_bridge.cpp
 )
 target_compile_features(fliqc_controller_ros_profile PUBLIC 
     cxx_std_17

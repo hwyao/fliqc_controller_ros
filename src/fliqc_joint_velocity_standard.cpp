@@ -131,6 +131,14 @@ bool FLIQCJointVelocityStandard::init(hardware_interface::RobotHW* robot_hardwar
   READ_PARAM(node_handle, controller_name,
     "/robot_env_evaluator/robust_pinv_lambda", env_evaluator_ptr_->robust_pinv_lambda_);
 
+  if (preset->isFrankaRobot()){
+    franka_hw::FrankaModelInterface* model_interface_ = robot_hardware->get<franka_hw::FrankaModelInterface>();
+    CHECK_NOT_EMPTY(controller_name, model_interface_ == nullptr);
+    CATCH_BLOCK(controller_name,
+      mass_matrix_bridge_ = std::make_unique<FrankaModelInterfaceBridge>(model_interface_, arm_id);
+    )
+  }
+
   // subscribe to the targeted velocity and goal to distance from the multi-agent system
   targeted_velocity_sub_ = node_handle.subscribe("/agent_twist_global", 1, &FLIQCJointVelocityStandard::targetedVelocityCallback, this);
   dist_to_goal_sub_ = node_handle.subscribe("/distance_to_goal", 1, &FLIQCJointVelocityStandard::distanceToGoalCallback, this);
@@ -247,7 +255,9 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
   DBGNPROF_START_CLOCK;
   // Calculate the controller cost input
   FLIQC_controller_core::FLIQC_state_input state_input;
-  state_input.M;      
+  if (controller_ptr_->quad_cost_type == FLIQC_controller_core::FLIQC_quad_cost_type::FLIQC_QUAD_COST_MASS_MATRIX){
+    mass_matrix_bridge_->getMassMatrix(q, state_input.M);
+  }
   state_input.J = J;  
 
   // Get the obstacle distance information and convert it as the distance input for the controller
