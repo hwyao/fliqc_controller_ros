@@ -292,6 +292,7 @@ Visualization Manager:
       Name: MarkerArray
       Namespaces:
         controller_info: true
+        controller_result: true
       Queue Size: 100
       Value: true
     - Class: rviz/MarkerArray
@@ -303,14 +304,6 @@ Visualization Manager:
         env_info_normal: true
         env_info_obs: true
         env_info_rbt: true
-      Queue Size: 100
-      Value: true
-    - Class: rviz/MarkerArray
-      Enabled: true
-      Marker Topic: /controller_result
-      Name: MarkerArray
-      Namespaces:
-        controller_result: true
       Queue Size: 100
       Value: true
   Enabled: true
@@ -341,7 +334,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 1.8637746572494507
+      Distance: 2.027742624282837
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -357,9 +350,9 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.9053975343704224
+      Pitch: 0.9603976607322693
       Target Frame: <Fixed Frame>
-      Yaw: 0.10539619624614716
+      Yaw: 0.1253960132598877
     Saved: ~
 Window Geometry:
   Displays:
