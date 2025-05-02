@@ -17,9 +17,9 @@ lcqpow:
     penaltyUpdateFactor: 2.0
 
 fliqc_controller_core:
-    quad_cost_type: 1                      # 0: identity, 1: joint_velocity_guide_error, 2: mass matrix (energy)
+    quad_cost_type: 3                      # 0: identity, 1: error to joint velocity guide, 2: mass matrix, 3: mass matrix weighted error to joint velocity guide
     linear_cost_type: 0                    # 0: none
-    lambda_cost_penalty: 1000.0
+    lambda_cost_penalty: 10000.0
     enable_lambda_constraint_in_L: false
     enable_lambda_constraint_in_x: true
     lambda_max: 1.7976931348623157E+308
@@ -30,6 +30,7 @@ fliqc_controller_core:
     eps: 0.01
     active_threshold: 0.04
     q_dot_max: [2.1750, 2.1750, 2.1750, 2.1750, 2.6100, 2.6100, 2.6100]   # [rad/s]
+    weight_on_mass_matrix: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
 
 robot_env_evaluator:
     calculate_self_collision: false

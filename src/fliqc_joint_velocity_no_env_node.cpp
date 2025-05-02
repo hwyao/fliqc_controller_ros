@@ -126,6 +126,13 @@ bool FLIQCJointVelocityNoEnvNode::init(hardware_interface::RobotHW* robot_hardwa
     "/robot_env_evaluator/projector_dist_to_control_enable", env_evaluator_ptr_->projector_dist_to_control_enable_);
   READ_PARAM(node_handle, controller_name,
     "/robot_env_evaluator/projector_dist_to_control_with_zero_orientation", env_evaluator_ptr_->projector_dist_to_control_with_zero_orientation_);
+  if (preset->isFrankaRobot()){
+    franka_hw::FrankaModelInterface* model_interface_ = robot_hardware->get<franka_hw::FrankaModelInterface>();
+    CHECK_NOT_NULLPTR(controller_name, model_interface_);
+    CATCH_BLOCK(controller_name,
+      mass_matrix_bridge_ = std::make_unique<FrankaModelInterfaceBridge>(model_interface_, arm_id);
+    )
+  }
 
   // simulate virtual dynamic obstacle information
   obsList_.push_back(Eigen::Vector3d(0.25, 0.5, 0.6)); 
@@ -263,7 +270,10 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
   DBGNPROF_START_CLOCK;
   // Calculate the controller cost input
   FLIQC_controller_core::FLIQC_state_input state_input;
-  state_input.M;      //tbd = Eigen::MatrixXd::Identity(dim_q_, dim_q_);
+  if (controller_ptr_->quad_cost_type == FLIQC_controller_core::FLIQC_quad_cost_type::FLIQC_QUAD_COST_MASS_MATRIX ||
+      controller_ptr_->quad_cost_type == FLIQC_controller_core::FLIQC_quad_cost_type::FLIQC_QUAD_COST_MASS_MATRIX_VELOCITY_ERROR){
+    mass_matrix_bridge_->getMassMatrix(q, state_input.M);
+  }
   state_input.J = J;  //tbd = Eigen::VectorXd::Zero(dim_q_);
 
   // Get the obstacle distance information and convert it as the distance input for the controller
