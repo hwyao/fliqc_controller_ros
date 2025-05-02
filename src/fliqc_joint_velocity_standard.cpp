@@ -48,13 +48,13 @@ bool FLIQCJointVelocityStandard::init(hardware_interface::RobotHW* robot_hardwar
   READ_PARAM(node_handle, controller_name, "arm_id", arm_id);
 
   std::vector<std::string> joint_names;
-  READ_PARAM_SILENT(node_handle, controller_name, "joint_names", joint_names);
+  READ_PARAM_VECTOR(node_handle, controller_name, "joint_names", joint_names);
   
   dim_q_ = joint_names.size();
 
   // Get the control interface of the robot joints
   auto velocity_joint_interface_ = robot_hardware->get<hardware_interface::VelocityJointInterface>();
-  CHECK_NOT_EMPTY(controller_name, velocity_joint_interface_ == nullptr);
+  CHECK_NOT_NULLPTR(controller_name, velocity_joint_interface_);
   velocity_joint_handles_.resize(dim_q_);
   for (size_t i = 0; i < dim_q_; ++i) {
     CATCH_BLOCK(controller_name, 
@@ -77,13 +77,10 @@ bool FLIQCJointVelocityStandard::init(hardware_interface::RobotHW* robot_hardwar
   controller_ptr_->lcqp_solver.updateOptions();
 
   // Get controller parameters: fliqc_controller_core parameters
-  int quad_cost_type, linear_cost_type;
-  READ_PARAM(node_handle, controller_name,
-    "/fliqc_controller_core/quad_cost_type", quad_cost_type);
-  controller_ptr_->quad_cost_type = static_cast<FLIQC_controller_core::FLIQC_quad_cost_type>(quad_cost_type);
-  READ_PARAM(node_handle, controller_name,
-    "/fliqc_controller_core/linear_cost_type", linear_cost_type);
-  controller_ptr_->linear_cost_type = static_cast<FLIQC_controller_core::FLIQC_linear_cost_type>(linear_cost_type);
+  READ_PARAM_ENUM(node_handle, controller_name,
+    "/fliqc_controller_core/quad_cost_type", controller_ptr_->quad_cost_type, FLIQC_controller_core::FLIQC_quad_cost_type);
+  READ_PARAM_ENUM(node_handle, controller_name,
+    "/fliqc_controller_core/linear_cost_type", controller_ptr_->linear_cost_type, FLIQC_controller_core::FLIQC_linear_cost_type);
   READ_PARAM(node_handle, controller_name,
       "/fliqc_controller_core/lambda_cost_penalty", controller_ptr_->lambda_cost_penalty);
   READ_PARAM(node_handle, controller_name,
@@ -104,11 +101,10 @@ bool FLIQCJointVelocityStandard::init(hardware_interface::RobotHW* robot_hardwar
       "/fliqc_controller_core/eps", controller_ptr_->eps);
   READ_PARAM(node_handle, controller_name,
       "/fliqc_controller_core/active_threshold", controller_ptr_->active_threshold);
-  
-  std::vector<double> q_dot_max;
-  READ_PARAM_SILENT(node_handle, controller_name, "/fliqc_controller_core/q_dot_max", q_dot_max);
-  controller_ptr_->q_dot_max = Eigen::Map<Eigen::VectorXd>(q_dot_max.data(), q_dot_max.size());
-  ROS_INFO_STREAM(controller_name << ": Getting parameter q_dot_max: " << controller_ptr_->q_dot_max.transpose());
+  READ_PARAM_EIGEN(node_handle, controller_name,
+      "/fliqc_controller_core/q_dot_max", controller_ptr_->q_dot_max, dim_q_);
+  READ_PARAM_EIGEN(node_handle, controller_name,
+      "/fliqc_controller_core/weight_on_mass_matrix", controller_ptr_->weight_on_mass_matrix, dim_q_);
 
   // Initialize the robot environment evaluator in robot_env_evaluator
   pinocchio::Model model;
@@ -118,7 +114,7 @@ bool FLIQCJointVelocityStandard::init(hardware_interface::RobotHW* robot_hardwar
   std::string robot_preset;
   READ_PARAM(node_handle, controller_name, "robot_preset", robot_preset);
   auto preset = robot_env_evaluator::RobotPresetFactory::createRobotPreset(robot_preset);
-  CHECK_NOT_EMPTY(controller_name, preset == nullptr);
+  CHECK_NOT_NULLPTR(controller_name, preset);
   preset->getPresetRobot(model, ee_name_preset, joint_names_preset, collision_model);
 
   env_evaluator_ptr_ = std::make_unique<robot_env_evaluator::RobotEnvEvaluator>(model, ee_name_preset, joint_names_preset, collision_model);
@@ -130,10 +126,9 @@ bool FLIQCJointVelocityStandard::init(hardware_interface::RobotHW* robot_hardwar
     "/robot_env_evaluator/projector_dist_to_control_with_zero_orientation", env_evaluator_ptr_->projector_dist_to_control_with_zero_orientation_);
   READ_PARAM(node_handle, controller_name,
     "/robot_env_evaluator/robust_pinv_lambda", env_evaluator_ptr_->robust_pinv_lambda_);
-
   if (preset->isFrankaRobot()){
     franka_hw::FrankaModelInterface* model_interface_ = robot_hardware->get<franka_hw::FrankaModelInterface>();
-    CHECK_NOT_EMPTY(controller_name, model_interface_ == nullptr);
+    CHECK_NOT_NULLPTR(controller_name, model_interface_);
     CATCH_BLOCK(controller_name,
       mass_matrix_bridge_ = std::make_unique<FrankaModelInterfaceBridge>(model_interface_, arm_id);
     )
