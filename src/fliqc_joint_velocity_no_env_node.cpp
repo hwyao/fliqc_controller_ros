@@ -49,13 +49,13 @@ bool FLIQCJointVelocityNoEnvNode::init(hardware_interface::RobotHW* robot_hardwa
   READ_PARAM(node_handle, controller_name, "arm_id", arm_id);
 
   std::vector<std::string> joint_names;
-  READ_PARAM_SILENT(node_handle, controller_name, "joint_names", joint_names);
+  READ_PARAM_VECTOR(node_handle, controller_name, "joint_names", joint_names);
   
   dim_q_ = joint_names.size();
 
   // Get the control interface of the robot joints
   auto velocity_joint_interface_ = robot_hardware->get<hardware_interface::VelocityJointInterface>();
-  CHECK_NOT_EMPTY(controller_name, velocity_joint_interface_ == nullptr);
+  CHECK_NOT_NULLPTR(controller_name, velocity_joint_interface_);
   velocity_joint_handles_.resize(dim_q_);
   for (size_t i = 0; i < dim_q_; ++i) {
     CATCH_BLOCK(controller_name, 
@@ -78,13 +78,10 @@ bool FLIQCJointVelocityNoEnvNode::init(hardware_interface::RobotHW* robot_hardwa
   controller_ptr_->lcqp_solver.updateOptions();
 
   // Get controller parameters: fliqc_controller_core parameters
-  int quad_cost_type, linear_cost_type;
-  READ_PARAM(node_handle, controller_name,
-    "/fliqc_controller_core/quad_cost_type", quad_cost_type);
-  controller_ptr_->quad_cost_type = static_cast<FLIQC_controller_core::FLIQC_quad_cost_type>(quad_cost_type);
-  READ_PARAM(node_handle, controller_name,
-    "/fliqc_controller_core/linear_cost_type", linear_cost_type);
-  controller_ptr_->linear_cost_type = static_cast<FLIQC_controller_core::FLIQC_linear_cost_type>(linear_cost_type);
+  READ_PARAM_ENUM(node_handle, controller_name,
+    "/fliqc_controller_core/quad_cost_type", controller_ptr_->quad_cost_type, FLIQC_controller_core::FLIQC_quad_cost_type);
+  READ_PARAM_ENUM(node_handle, controller_name,
+    "/fliqc_controller_core/linear_cost_type", controller_ptr_->linear_cost_type, FLIQC_controller_core::FLIQC_linear_cost_type);
   READ_PARAM(node_handle, controller_name,
       "/fliqc_controller_core/lambda_cost_penalty", controller_ptr_->lambda_cost_penalty);
   READ_PARAM(node_handle, controller_name,
@@ -106,10 +103,10 @@ bool FLIQCJointVelocityNoEnvNode::init(hardware_interface::RobotHW* robot_hardwa
   READ_PARAM(node_handle, controller_name,
       "/fliqc_controller_core/active_threshold", controller_ptr_->active_threshold);
   
-  std::vector<double> q_dot_max;
-  READ_PARAM_SILENT(node_handle, controller_name, "/fliqc_controller_core/q_dot_max", q_dot_max);
-  controller_ptr_->q_dot_max = Eigen::Map<Eigen::VectorXd>(q_dot_max.data(), q_dot_max.size());
-  ROS_INFO_STREAM(controller_name << ": Getting parameter q_dot_max: " << controller_ptr_->q_dot_max.transpose());
+  READ_PARAM_EIGEN(node_handle, controller_name,
+    "/fliqc_controller_core/q_dot_max", controller_ptr_->q_dot_max, dim_q_);
+  READ_PARAM_EIGEN(node_handle, controller_name,
+    "/fliqc_controller_core/weight_on_mass_matrix", controller_ptr_->weight_on_mass_matrix, dim_q_);
 
   // Initialize the robot environment evaluator in robot_env_evaluator
   pinocchio::Model model;
@@ -119,7 +116,7 @@ bool FLIQCJointVelocityNoEnvNode::init(hardware_interface::RobotHW* robot_hardwa
   std::string robot_preset;
   READ_PARAM(node_handle, controller_name, "robot_preset", robot_preset);
   auto preset = robot_env_evaluator::RobotPresetFactory::createRobotPreset(robot_preset);
-  CHECK_NOT_EMPTY(controller_name, preset == nullptr);
+  CHECK_NOT_NULLPTR(controller_name, preset);
   preset->getPresetRobot(model, ee_name_preset, joint_names_preset, collision_model);
 
   env_evaluator_ptr_ = std::make_unique<robot_env_evaluator::RobotEnvEvaluator>(model, ee_name_preset, joint_names_preset, collision_model);
@@ -129,6 +126,13 @@ bool FLIQCJointVelocityNoEnvNode::init(hardware_interface::RobotHW* robot_hardwa
     "/robot_env_evaluator/projector_dist_to_control_enable", env_evaluator_ptr_->projector_dist_to_control_enable_);
   READ_PARAM(node_handle, controller_name,
     "/robot_env_evaluator/projector_dist_to_control_with_zero_orientation", env_evaluator_ptr_->projector_dist_to_control_with_zero_orientation_);
+  if (preset->isFrankaRobot()){
+    franka_hw::FrankaModelInterface* model_interface_ = robot_hardware->get<franka_hw::FrankaModelInterface>();
+    CHECK_NOT_NULLPTR(controller_name, model_interface_);
+    CATCH_BLOCK(controller_name,
+      mass_matrix_bridge_ = std::make_unique<FrankaModelInterfaceBridge>(model_interface_, arm_id);
+    )
+  }
 
   // simulate virtual dynamic obstacle information
   obsList_.push_back(Eigen::Vector3d(0.25, 0.5, 0.6)); 
@@ -266,7 +270,10 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
   DBGNPROF_START_CLOCK;
   // Calculate the controller cost input
   FLIQC_controller_core::FLIQC_state_input state_input;
-  state_input.M;      //tbd = Eigen::MatrixXd::Identity(dim_q_, dim_q_);
+  if (controller_ptr_->quad_cost_type == FLIQC_controller_core::FLIQC_quad_cost_type::FLIQC_QUAD_COST_MASS_MATRIX ||
+      controller_ptr_->quad_cost_type == FLIQC_controller_core::FLIQC_quad_cost_type::FLIQC_QUAD_COST_MASS_MATRIX_VELOCITY_ERROR){
+    mass_matrix_bridge_->getMassMatrix(q, state_input.M);
+  }
   state_input.J = J;  //tbd = Eigen::VectorXd::Zero(dim_q_);
 
   // Get the obstacle distance information and convert it as the distance input for the controller
@@ -377,33 +384,6 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
         goal_marker.color.b = 0.0;
         obs_marker_array.markers.push_back(goal_marker);
 
-        // The current EE position
-        visualization_msgs::Marker diff_arrow;
-        diff_arrow.header.frame_id = "panda_link0";
-        diff_arrow.header.stamp = ros::Time::now(); 
-        diff_arrow.ns = "controller_info";
-        diff_arrow.id = 1;
-        diff_arrow.type = visualization_msgs::Marker::ARROW;
-        diff_arrow.action = visualization_msgs::Marker::ADD;
-        point_helper.x = now_(0);
-        point_helper.y = now_(1);
-        point_helper.z = now_(2);
-        diff_arrow.points.push_back(point_helper);
-        Eigen::Vector3d goal_diff_regularized_after = now_ + goal_diff_regularized;
-        point_helper.x = goal_diff_regularized_after(0);
-        point_helper.y = goal_diff_regularized_after(1);
-        point_helper.z = goal_diff_regularized_after(2);
-        diff_arrow.points.push_back(point_helper);
-        diff_arrow.pose.orientation.w = 1.0;
-        diff_arrow.scale.x = 0.005;
-        diff_arrow.scale.y = 0.01;
-        diff_arrow.scale.z = 0.01;
-        diff_arrow.color.a = 0.6;
-        diff_arrow.color.r = 0.0;
-        diff_arrow.color.g = 1.0;
-        diff_arrow.color.b = 0.0;
-        obs_marker_array.markers.push_back(diff_arrow);
-
         // The velocity guide vector
         visualization_msgs::Marker q_dot_guide_marker;
         q_dot_guide_marker.header.frame_id = "panda_link0";
@@ -425,11 +405,39 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
         q_dot_guide_marker.scale.x = 0.005;
         q_dot_guide_marker.scale.y = 0.01;
         q_dot_guide_marker.scale.z = 0.01;
-        q_dot_guide_marker.color.a = 0.4;
+        q_dot_guide_marker.color.a = 0.5;
         q_dot_guide_marker.color.r = 0.0;
         q_dot_guide_marker.color.g = 0.0;
         q_dot_guide_marker.color.b = 1.0;
         obs_marker_array.markers.push_back(q_dot_guide_marker);
+
+        // visualize the real EE velocity
+        Eigen::VectorXd real_EE_velocity = J * q_dot_command;
+        visualization_msgs::Marker real_EE_velocity_marker;
+        real_EE_velocity_marker.header.frame_id = "panda_link0";
+        real_EE_velocity_marker.header.stamp = ros::Time::now();
+        real_EE_velocity_marker.ns = "controller_result";
+        real_EE_velocity_marker.id = 1;
+        real_EE_velocity_marker.type = visualization_msgs::Marker::ARROW;
+        real_EE_velocity_marker.action = visualization_msgs::Marker::ADD;
+        point_helper.x = now_(0);
+        point_helper.y = now_(1);
+        point_helper.z = now_(2);
+        real_EE_velocity_marker.points.push_back(point_helper);
+        Eigen::Vector3d real_EE_velocity_end = now_ + real_EE_velocity.head(3);
+        point_helper.x = real_EE_velocity_end(0);
+        point_helper.y = real_EE_velocity_end(1);
+        point_helper.z = real_EE_velocity_end(2);
+        real_EE_velocity_marker.points.push_back(point_helper);
+        real_EE_velocity_marker.pose.orientation.w = 1.0;
+        real_EE_velocity_marker.scale.x = 0.005;
+        real_EE_velocity_marker.scale.y = 0.01;
+        real_EE_velocity_marker.scale.z = 0.01;
+        real_EE_velocity_marker.color.a = 0.9;
+        real_EE_velocity_marker.color.r = 0.0;
+        real_EE_velocity_marker.color.g = 1.0;
+        real_EE_velocity_marker.color.b = 0.0;
+        obs_marker_array.markers.push_back(real_EE_velocity_marker);
       obs_pub.publish(obs_marker_array);
     }
   } while(false);
@@ -551,53 +559,6 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
         obs_pub.publish(obs_marker_array);
       }
     } while(false);
-  #endif // CONTROLLER_DEBUG
-
-  // publish and visualize the controller output information
-  #ifdef CONTROLLER_DEBUG
-  do{
-    static ros::NodeHandle node_handle;
-    static ros::Time last_publish_time = ros::Time::now();
-    if (ros::Time::now() - last_publish_time > ros::Duration(1.0/30) || error_flag_ == true){
-      last_publish_time = ros::Time::now();
-      static ros::Publisher obs_pub;
-      if (!obs_pub){
-        obs_pub = node_handle.advertise<visualization_msgs::MarkerArray>("controller_result", 10);
-      }
-      visualization_msgs::MarkerArray obs_marker_array;
-      geometry_msgs::Point point_helper;
-      
-      Eigen::VectorXd real_EE_velocity = J * q_dot_command;
-      // visualize the real EE velocity
-      visualization_msgs::Marker real_EE_velocity_marker;
-      real_EE_velocity_marker.header.frame_id = "panda_link0";
-      real_EE_velocity_marker.header.stamp = ros::Time::now();
-      real_EE_velocity_marker.ns = "controller_result";
-      real_EE_velocity_marker.id = 1;
-      real_EE_velocity_marker.type = visualization_msgs::Marker::ARROW;
-      real_EE_velocity_marker.action = visualization_msgs::Marker::ADD;
-      point_helper.x = now_(0);
-      point_helper.y = now_(1);
-      point_helper.z = now_(2);
-      real_EE_velocity_marker.points.push_back(point_helper);
-      Eigen::Vector3d real_EE_velocity_end = now_ + real_EE_velocity.head(3);
-      point_helper.x = real_EE_velocity_end(0);
-      point_helper.y = real_EE_velocity_end(1);
-      point_helper.z = real_EE_velocity_end(2);
-      real_EE_velocity_marker.points.push_back(point_helper);
-      real_EE_velocity_marker.pose.orientation.w = 1.0;
-      real_EE_velocity_marker.scale.x = 0.005;
-      real_EE_velocity_marker.scale.y = 0.01;
-      real_EE_velocity_marker.scale.z = 0.01;
-      real_EE_velocity_marker.color.a = 0.9;
-      real_EE_velocity_marker.color.r = 0.0;
-      real_EE_velocity_marker.color.g = 1.0;
-      real_EE_velocity_marker.color.b = 0.0;
-      obs_marker_array.markers.push_back(real_EE_velocity_marker);
-
-      obs_pub.publish(obs_marker_array);
-    }
-  } while(false);
   #endif // CONTROLLER_DEBUG
 
   if (!error_flag_) {

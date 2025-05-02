@@ -42,7 +42,7 @@ bool APFJointVelocity::init(hardware_interface::RobotHW* robot_hardware, ros::No
   // Get the control interface of the robot joints
   auto velocity_joint_interface_ = robot_hardware->get<hardware_interface::VelocityJointInterface>();
 
-  CHECK_NOT_EMPTY(controller_name, velocity_joint_interface_ == nullptr);
+  CHECK_NOT_NULLPTR(controller_name, velocity_joint_interface_);
 
   velocity_joint_handles_.resize(dim_q_);
 
@@ -60,7 +60,7 @@ bool APFJointVelocity::init(hardware_interface::RobotHW* robot_hardware, ros::No
   std::string robot_preset;
   READ_PARAM(node_handle, controller_name, "robot_preset", robot_preset);
   auto preset = robot_env_evaluator::RobotPresetFactory::createRobotPreset(robot_preset);
-  CHECK_NOT_EMPTY(controller_name, preset == nullptr);
+  CHECK_NOT_NULLPTR(controller_name, preset);
   preset->getPresetRobot(model, ee_name_preset, joint_names_preset, collision_model);
 
   env_evaluator_ptr_ = std::make_unique<robot_env_evaluator::RobotEnvEvaluator>(model, ee_name_preset, joint_names_preset, collision_model);

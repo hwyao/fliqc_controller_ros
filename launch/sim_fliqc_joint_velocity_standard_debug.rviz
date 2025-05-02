@@ -5,6 +5,7 @@ Panels:
     Property Tree Widget:
       Expanded:
         - /TF1
+        - /MarkerArray2/Namespaces1
       Splitter Ratio: 0.4077380895614624
     Tree Height: 713
   - Class: rviz/Selection
@@ -340,6 +341,7 @@ Visualization Manager:
       Name: MarkerArray
       Namespaces:
         controller_info: true
+        controller_result: true
       Queue Size: 100
       Value: true
     - Class: rviz/MarkerArray
@@ -360,14 +362,7 @@ Visualization Manager:
       Namespaces:
         Obstacle1: true
         Obstacle2: true
-      Queue Size: 100
-      Value: true
-    - Class: rviz/MarkerArray
-      Enabled: true
-      Marker Topic: /controller_result
-      Name: MarkerArray
-      Namespaces:
-        controller_result: true
+        Obstacle3: true
       Queue Size: 100
       Value: true
   Enabled: true
