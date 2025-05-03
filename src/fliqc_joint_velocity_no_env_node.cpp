@@ -265,7 +265,7 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
   }
   Eigen::MatrixXd Jpos = J.block<3, 7>(0, 0);
   q_dot_guide = Jpos.jacobiSvd(Eigen::ComputeThinU | Eigen::ComputeThinV).solve(goal_diff_regularized);
-  DBGNPROF_STOP_CLOCK("Kinematics");
+  DBGNPROF_STOP_CLOCK("kinematics");
 
   DBGNPROF_START_CLOCK;
   // Calculate the controller cost input

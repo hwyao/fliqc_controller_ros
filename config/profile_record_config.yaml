@@ -1,0 +1,7 @@
+debug_and_profile_helper:
+  record_list:
+    - "/joint_states"
+    - "/debug_and_profile_helper/kinematics"
+    - "/debug_and_profile_helper/computeDistances"
+    - "/debug_and_profile_helper/organizeData"
+    - "/debug_and_profile_helper/runController"
