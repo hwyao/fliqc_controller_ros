@@ -250,6 +250,7 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
   DBGNPROF_START_CLOCK;
   // Calculate the controller cost input
   FLIQC_controller_core::FLIQC_state_input state_input;
+  state_input.q_dot_guide = q_dot_guide;
   if (controller_ptr_->quad_cost_type == FLIQC_controller_core::FLIQC_quad_cost_type::FLIQC_QUAD_COST_MASS_MATRIX ||
       controller_ptr_->quad_cost_type == FLIQC_controller_core::FLIQC_quad_cost_type::FLIQC_QUAD_COST_MASS_MATRIX_VELOCITY_ERROR){
     mass_matrix_bridge_->getMassMatrix(q, state_input.M);
@@ -284,12 +285,13 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
   // }
 
   Eigen::VectorXd q_dot_command;
+  FLIQC_controller_core::FLIQC_control_output control_output;
 
   // run the controller
   if (!error_flag_){
     try {
       DBGNPROF_START_CLOCK;
-      q_dot_command = controller_ptr_->runController(q_dot_guide, state_input, distance_inputs);
+      q_dot_command = controller_ptr_->runController(state_input, distance_inputs, control_output);
       DBGNPROF_STOP_CLOCK("runController");
 
     } catch (const FLIQC_controller_core::LCQPowException& e) {
