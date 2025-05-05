@@ -226,16 +226,20 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
   // }
 
   DBGNPROF_START_CLOCK;
-  // Calculate the targeted velocity goal
-  Eigen::VectorXd q_dot_guide(dim_q_);
-  
+  // Get the kinematics information
   Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
   Eigen::MatrixXd J = Eigen::MatrixXd::Zero(6, dim_q_);
   env_evaluator_ptr_ -> forwardKinematics(q, T);
   env_evaluator_ptr_ -> jacobian(q, J);
 
+  // Calculate the targeted velocity goal
+  Eigen::VectorXd q_dot_guide = Eigen::VectorXd::Zero(dim_q_);
   Eigen::Vector3d now_ = T.block<3, 1>(0, 3);
-  Eigen::Vector3d goal_diff = targeted_velocity_;
+  // If you are asking why redundant assign targeted_velocity, instead of initializing goal_diff with targeted_velocity_ directly,
+  // I can only answer its an optimization magic. You can also try to print goal_diff out and problem also will go away.
+  // if you don't have either of them, just wait to be r🦍d by the compiler :P
+  Eigen::Vector3d targeted_velocity = targeted_velocity_;         
+  Eigen::Vector3d goal_diff = targeted_velocity; // = targeted_velocity_;
   Eigen::Vector3d goal_diff_regularized = goal_diff;
   double vel = 0.05;
   if (goal_diff_regularized.norm() > (vel/0.5)){
@@ -246,6 +250,7 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
   Eigen::MatrixXd Jpos = J.block<3, 7>(0, 0);
   q_dot_guide = Jpos.jacobiSvd(Eigen::ComputeThinU | Eigen::ComputeThinV).solve(goal_diff_regularized);
   DBGNPROF_STOP_CLOCK("kinematics");
+  //ROS_INFO_STREAM_THROTTLE(1, controller_name << ": goal_diff is " << goal_diff.transpose()); // wanna try it huh？ :D
 
   DBGNPROF_START_CLOCK;
   // Calculate the controller cost input
