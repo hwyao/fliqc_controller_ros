@@ -26,6 +26,8 @@
 #include <visualization_msgs/MarkerArray.h>
 #include <visualization_msgs/Marker.h>
 #include <geometry_msgs/Point.h>
+#define DBGNPROF_USE_ROS
+#define DBGNPROF_ENABLE_DEBUG
 #endif // CONTROLLER_DEBUG
 
 #ifdef CONTROLLER_PROFILE
@@ -528,6 +530,11 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
         obs_pub.publish(obs_marker_array);
       }
     } while(false);
+  #endif // CONTROLLER_DEBUG
+
+  #ifdef CONTROLLER_DEBUG
+  DBGNPROF_LOG("q_guide", q_dot_guide);
+  DBGNPROF_LOG("q_dot", q_dot_command);
   #endif // CONTROLLER_DEBUG
 
   if (!error_flag_) {

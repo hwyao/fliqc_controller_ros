@@ -1,0 +1,8 @@
+debug_and_profile_helper:
+  record_list:
+    - "/joint_states"
+    - "/debug_and_profile_helper/CLK_kinematics"
+    - "/debug_and_profile_helper/CLK_computeDistances"
+    - "/debug_and_profile_helper/CLK_organizeData"
+    - "/debug_and_profile_helper/CLK_runController"
+  record_bag_name: "example.bag"

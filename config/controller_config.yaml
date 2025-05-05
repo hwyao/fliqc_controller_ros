@@ -27,7 +27,7 @@ fliqc_controller_core:
     esc_vel_max: 1.7976931348623157E+308
     enable_nullspace_projector_in_A: true
     dt: 0.06
-    eps: 0.01
+    eps: 0.02
     active_threshold: 0.04
     q_dot_max: [2.1750, 2.1750, 2.1750, 2.1750, 2.6100, 2.6100, 2.6100]   # [rad/s]
     weight_on_mass_matrix: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
