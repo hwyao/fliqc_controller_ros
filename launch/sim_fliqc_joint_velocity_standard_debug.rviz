@@ -172,10 +172,12 @@ Visualization Manager:
       Visual Enabled: true
     - Class: rviz/MarkerArray
       Enabled: true
-      Marker Topic: /obstacles
+      Marker Topic: /obstacle_markers
       Name: MarkerArray
       Namespaces:
-        {}
+        Obstacle1: true
+        Obstacle2: true
+        Obstacle3: true
       Queue Size: 100
       Value: true
     - Class: rviz/TF
@@ -340,8 +342,7 @@ Visualization Manager:
       Marker Topic: /controller_info
       Name: MarkerArray
       Namespaces:
-        controller_info: true
-        controller_result: true
+        {}
       Queue Size: 100
       Value: true
     - Class: rviz/MarkerArray
@@ -349,20 +350,7 @@ Visualization Manager:
       Marker Topic: /environment_result
       Name: MarkerArray
       Namespaces:
-        env_info_connection: true
-        env_info_normal: true
-        env_info_obs: true
-        env_info_rbt: true
-      Queue Size: 100
-      Value: true
-    - Class: rviz/MarkerArray
-      Enabled: true
-      Marker Topic: /obstacle_markers
-      Name: MarkerArray
-      Namespaces:
-        Obstacle1: true
-        Obstacle2: true
-        Obstacle3: true
+        {}
       Queue Size: 100
       Value: true
   Enabled: true
@@ -393,7 +381,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 1.1372253894805908
+      Distance: 1.5977197885513306
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -409,9 +397,9 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.7553974986076355
+      Pitch: 0.8953973650932312
       Target Frame: <Fixed Frame>
-      Yaw: 0.43224021792411804
+      Yaw: 0.42724019289016724
     Saved: ~
 Window Geometry:
   Displays:

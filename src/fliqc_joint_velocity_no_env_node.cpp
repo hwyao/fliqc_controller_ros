@@ -21,11 +21,9 @@
 #include <hardware_interface/joint_command_interface.h>
 #include <pluginlib/class_list_macros.h>
 
-#ifdef CONTROLLER_DEBUG
 #include <visualization_msgs/MarkerArray.h>
 #include <visualization_msgs/Marker.h>
 #include <geometry_msgs/Point.h>
-#endif // CONTROLLER_DEBUG
 
 #ifdef CONTROLLER_PROFILE
 #define DBGNPROF_USE_ROS
@@ -191,7 +189,6 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
   }
   
   // publish and visualize the obstacles made by this controller
-  #ifdef CONTROLLER_DEBUG
   // make a publisher for the obstacle, do it in 30Hz
   do{
     static ros::NodeHandle node_handle;
@@ -231,7 +228,6 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
       obs_pub.publish(obs_marker_array);
     }
   } while(false);
-  #endif // CONTROLLER_DEBUG
 
   DBGNPROF_START_CLOCK; 
   env_evaluator_ptr_ -> computeDistances(q, obstacles, distances);
@@ -245,14 +241,14 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
   // }
 
   DBGNPROF_START_CLOCK;
-  // Calculate the targeted velocity goal
-  Eigen::VectorXd q_dot_guide(dim_q_);
-  
+  // Get the kinematics information
   Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
   Eigen::MatrixXd J = Eigen::MatrixXd::Zero(6, dim_q_);
   env_evaluator_ptr_ -> forwardKinematics(q, T);
   env_evaluator_ptr_ -> jacobian(q, J);
 
+  // Calculate the targeted velocity goal
+  Eigen::VectorXd q_dot_guide(dim_q_);
   Eigen::Vector3d goal_(0.1, 0.450, 0.55);
   Eigen::Vector3d now_ = T.block<3, 1>(0, 3);
   Eigen::Vector3d goal_diff = goal_ - now_;
@@ -352,7 +348,7 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
     }
   }
 
-  // publish and visualize the controller start and goal information
+  // publish and visualize the controller goal information, EE guide and real velocity
   #ifdef CONTROLLER_DEBUG
   do{
     static ros::NodeHandle node_handle;
