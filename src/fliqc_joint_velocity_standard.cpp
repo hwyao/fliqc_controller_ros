@@ -474,7 +474,7 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
           connection_line.points.push_back(point_helper);
           connection_line.pose.orientation.w = 1.0;
           connection_line.scale.x = 0.0025;
-          connection_line.color.a = 0.6;
+          connection_line.color.a = 0.1;
           if (distances[i].distance > controller_ptr_->active_threshold){
             connection_line.color.r = 0.0;
             connection_line.color.g = 0.1;
