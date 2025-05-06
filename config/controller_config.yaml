@@ -32,6 +32,11 @@ fliqc_controller_core:
     q_dot_max: [2.1750, 2.1750, 2.1750, 2.1750, 2.6100, 2.6100, 2.6100]   # [rad/s]
     weight_on_mass_matrix: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
 
+fliqc_controller_ros:
+    position_convergence_threshold: 0.005
+    velocity_convergence_threshold: 0.05
+    diagnostic_period: 0.05
+
 robot_env_evaluator:
     calculate_self_collision: false
     projector_dist_to_control_enable: true

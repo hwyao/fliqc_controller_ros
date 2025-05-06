@@ -108,6 +108,15 @@ bool FLIQCJointVelocityStandard::init(hardware_interface::RobotHW* robot_hardwar
   READ_PARAM_EIGEN(node_handle, controller_name,
       "/fliqc_controller_core/weight_on_mass_matrix", controller_ptr_->weight_on_mass_matrix, dim_q_);
 
+  // Get controller parameters: fliqc_controller_ros parameters
+  double diagnostic_period;
+  READ_PARAM(node_handle, controller_name,
+      "/fliqc_controller_ros/position_convergence_threshold", position_convergence_threshold_);
+  READ_PARAM(node_handle, controller_name,
+      "/fliqc_controller_ros/velocity_convergence_threshold", velocity_convergence_threshold_);
+  READ_PARAM(node_handle, controller_name,
+      "/fliqc_controller_ros/diagnostic_period", diagnostic_period);
+
   // Initialize the robot environment evaluator in robot_env_evaluator
   pinocchio::Model model;
   std::string ee_name_preset;
@@ -140,24 +149,54 @@ bool FLIQCJointVelocityStandard::init(hardware_interface::RobotHW* robot_hardwar
   targeted_velocity_sub_ = node_handle.subscribe("/agent_twist_global", 1, &FLIQCJointVelocityStandard::targetedVelocityCallback, this);
 
   // subscribe to the planning scene information and wait for the first received message
-  planning_scene_sub_ = node_handle.subscribe("/planning_scene", 1, &FLIQCJointVelocityStandard::planningSceneCallback, this);
+  planning_scene_sub_ = node_handle.subscribe("/planning_scene", 1, &FLIQCJointVelocityStandard::planningSceneCallback, this, ros::TransportHints().unreliable());
+  goal_sub_ = node_handle.subscribe("/goal", 1, &FLIQCJointVelocityStandard::goalPoseCallback, this, ros::TransportHints().unreliable());
 
   // clear and warm up the data until the controller started
   ROS_INFO_STREAM(controller_name << ": Controller starting...");
   error_flag_ = false;
   targeted_velocity_ = Eigen::Vector3d::Zero();
   first_receive_obstacle_ = false;
+  goal_position_ = Eigen::Vector3d::Zero();
+  first_receive_goal_ = false;
   obstacles_.clear();
 
   // wait until first message received from all subscribers
   ros::Rate rate(10);
-  while (ros::ok() && (!first_receive_obstacle_)) {
-      ROS_INFO_STREAM_THROTTLE(1, controller_name << ": Waiting for scene messages...");
+  while (ros::ok() && !(first_receive_obstacle_ && first_receive_goal_)) {
+      ROS_INFO_STREAM_THROTTLE(1, controller_name << ": Waiting for messages... scene: [" << first_receive_obstacle_ << 
+                                                                              "] goal: [" << first_receive_goal_ << "]");
       ros::spinOnce();
       rate.sleep();
   }
-  ROS_INFO_STREAM(controller_name << ": Controller started.");
 
+  // Cold start the controller
+  Eigen::VectorXd q = Eigen::VectorXd::Zero(dim_q_);
+  for (size_t i = 0; i < dim_q_; ++i) {
+    q(i) = velocity_joint_handles_[i].getPosition();
+  }
+  Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
+  env_evaluator_ptr_ -> forwardKinematics(q, T);
+  Eigen::Vector3d now_ = T.block<3, 1>(0, 3);
+  position_error_norm_ = (goal_position_ - now_).norm();
+  velocity_norm_ = 0.0;
+  
+  // Initialize diagnostic updater
+  ros::NodeHandle ph("~");
+  ph.setParam("diagnostic_period", diagnostic_period);
+  diag_updater_ = std::make_unique<diagnostic_updater::Updater>(ros::NodeHandle(), ph, ros::this_node::getName());
+  diag_updater_->setHardwareID(arm_id);
+  diag_updater_->add("Controller state", this, &FLIQCJointVelocityStandard::checkControllerState);
+  diag_updater_->add("Position convergence", this, &FLIQCJointVelocityStandard::checkPositionConvergence);
+  diag_updater_->add("Velocity convergence", this, &FLIQCJointVelocityStandard::checkVelocityConvergence);
+  diag_updater_->force_update();
+  diag_updater_->update();
+
+  double period = diag_updater_->getPeriod();
+  ROS_INFO_STREAM(controller_name << ": Diagnostic name: " << ros::this_node::getName());
+  ROS_INFO_STREAM(controller_name << ": Diagnostic period: " << period);
+
+  ROS_INFO_STREAM(controller_name << ": Controller started.");
   return true;
 }
 
@@ -192,6 +231,39 @@ void FLIQCJointVelocityStandard::planningSceneCallback(const moveit_msgs::Planni
 
 void FLIQCJointVelocityStandard::targetedVelocityCallback(const geometry_msgs::TwistStamped::ConstPtr& msg) {
   targeted_velocity_ = Eigen::Vector3d(msg->twist.linear.x, msg->twist.linear.y, msg->twist.linear.z);
+}
+
+void FLIQCJointVelocityStandard::goalPoseCallback(const geometry_msgs::PoseStamped::ConstPtr& msg){
+  goal_position_ = Eigen::Vector3d(msg->pose.position.x, msg->pose.position.y, msg->pose.position.z);
+  if(first_receive_goal_ == false){ first_receive_goal_ = true; }
+}
+
+void FLIQCJointVelocityStandard::checkPositionConvergence(diagnostic_updater::DiagnosticStatusWrapper &stat){
+  if (position_error_norm_ < position_convergence_threshold_) {
+    stat.summary(diagnostic_msgs::DiagnosticStatus::OK, "Position convergence");
+  } else {
+    stat.summary(diagnostic_msgs::DiagnosticStatus::WARN, "Position not converged");
+  }
+  stat.add("Position error norm", position_error_norm_);
+  stat.add("Position convergence threshold", position_convergence_threshold_);
+}
+
+void FLIQCJointVelocityStandard::checkVelocityConvergence(diagnostic_updater::DiagnosticStatusWrapper &stat){
+  if (velocity_norm_ < velocity_convergence_threshold_) {
+    stat.summary(diagnostic_msgs::DiagnosticStatus::OK, "Velocity convergence");
+  } else {
+    stat.summary(diagnostic_msgs::DiagnosticStatus::WARN, "Velocity not converged");
+  }
+  stat.add("Velocity norm", velocity_norm_);
+  stat.add("Velocity convergence threshold", velocity_convergence_threshold_);
+}
+
+void FLIQCJointVelocityStandard::checkControllerState(diagnostic_updater::DiagnosticStatusWrapper &stat){
+  if (error_flag_) {
+    stat.summary(diagnostic_msgs::DiagnosticStatus::ERROR, "Controller error");
+  } else {
+    stat.summary(diagnostic_msgs::DiagnosticStatus::OK, "Controller running");
+  }
 }
 
 void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
@@ -237,8 +309,8 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
   // I can only answer its an optimization magic. You can also try to print goal_diff out and problem also will go away.
   // if you don't have either of them, just wait to be r🦍d by the compiler :P
   Eigen::Vector3d targeted_velocity = targeted_velocity_;         
-  Eigen::Vector3d goal_diff = targeted_velocity; // = targeted_velocity_;
-  Eigen::Vector3d goal_diff_regularized = goal_diff;
+  Eigen::Vector3d goal_diff = goal_position_ - now_; 
+  Eigen::Vector3d goal_diff_regularized = targeted_velocity; // = targeted_velocity_;
   double vel = 0.05;
   if (goal_diff_regularized.norm() > (vel/0.5)){
     goal_diff_regularized = goal_diff_regularized.normalized() * 0.05;
@@ -531,9 +603,9 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
   #endif // CONTROLLER_DEBUG
 
   #if defined(CONTROLLER_DEBUG) || defined(CONTROLLER_PROFILE)
-  DBGNPROF_LOG("q_real", q_dot);
-  DBGNPROF_LOG("q_guide", q_dot_guide);
-  DBGNPROF_LOG("q_command", q_dot_command);
+  DBGNPROF_LOG("q_dot_real", q_dot);
+  DBGNPROF_LOG("q_dot_guide", q_dot_guide);
+  DBGNPROF_LOG("q_dot_command", q_dot_command);
 
   Eigen::VectorXd distances_vec = Eigen::VectorXd::Zero(distances.size());
   for (size_t i = 0; i < distances.size(); ++i){
@@ -554,12 +626,17 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
   DBGNPROF_LOG("lambda", lambda_vec);
   #endif // CONTROLLER_DEBUG
 
+  position_error_norm_ = goal_diff.norm();
+  velocity_norm_ = q_dot.norm();
+  diag_updater_->update();
+
   if (!error_flag_) {
     for (size_t i = 0; i < 7; ++i) {
       velocity_joint_handles_[i].setCommand(q_dot_command(i));
     }
-    if (goal_diff.norm() <= 0.005) {
-      ROS_INFO_STREAM_THROTTLE(1, controller_name << ": Goal reached with tolerance " << goal_diff.norm());
+    if (position_error_norm_ <= position_convergence_threshold_ && velocity_norm_ <= velocity_convergence_threshold_) {
+      ROS_INFO_STREAM_THROTTLE(1, controller_name << ": Goal reached with tolerance [" << position_error_norm_ << 
+                                                                   "], and velocity [" << velocity_norm_ << "]");
     }
   } else {
     // enter error handling mode here, now only emegency stop.
