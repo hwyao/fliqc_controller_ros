@@ -32,7 +32,6 @@ class FLIQCJointVelocityStandard : public controller_interface::MultiInterfaceCo
 
   void planningSceneCallback(const moveit_msgs::PlanningScene::ConstPtr& msg);
   void targetedVelocityCallback(const geometry_msgs::TwistStamped::ConstPtr& msg);
-  void distanceToGoalCallback(const std_msgs::Float64::ConstPtr& msg);
 
  private:
   std::vector<hardware_interface::JointHandle> velocity_joint_handles_;
@@ -54,7 +53,6 @@ class FLIQCJointVelocityStandard : public controller_interface::MultiInterfaceCo
 
   // the subscriber variables, targeted velocity and distance to goal
   Eigen::Vector3d targeted_velocity_ = Eigen::Vector3d::Zero(); 
-  double distance_to_goal_ = 100.0;
   bool first_receive_obstacle_ = false;
 
   // the mutex for the obstacles
