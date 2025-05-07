@@ -49,8 +49,8 @@ class APFJointVelocity : public controller_interface::MultiInterfaceController<
   ros::Subscriber planning_scene_sub_;
   ros::Subscriber goal_pos_sub_; 
   // the targeted velocity and distance to goal
-  Eigen::Vector3d targeted_velocity_ = Eigen::Vector3d(-100,-100,-100);
-  double distance_to_goal_ = -100;
+  // Eigen::Vector3d targeted_velocity_ = Eigen::Vector3d(-100,-100,-100);
+  // double distance_to_goal_ = -100;
 
   Eigen::Vector3d goal_pos_ = Eigen::Vector3d::Zero(); // store goal pos 
   Eigen::Quaterniond  goal_orientation_ = Eigen::Quaterniond(1, 0.0, 0.0, 0.0); // store goal orientation

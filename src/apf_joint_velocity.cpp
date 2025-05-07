@@ -66,15 +66,15 @@ bool APFJointVelocity::init(hardware_interface::RobotHW* robot_hardware, ros::No
   env_evaluator_ptr_ = std::make_unique<robot_env_evaluator::RobotEnvEvaluator>(model, ee_name_preset, joint_names_preset, collision_model);
 
   // subscribe to the targeted velocity and goal to distance from the multi-agent system
-  targeted_velocity_sub_ = node_handle.subscribe("/agent_twist_global", 1, &APFJointVelocity::targetedVelocityCallback, this);
-  dist_to_goal_sub_ = node_handle.subscribe("/distance_to_goal", 1, &APFJointVelocity::distanceToGoalCallback, this);
+  //targeted_velocity_sub_ = node_handle.subscribe("/agent_twist_global", 1, &APFJointVelocity::targetedVelocityCallback, this);
+  //dist_to_goal_sub_ = node_handle.subscribe("/distance_to_goal", 1, &APFJointVelocity::distanceToGoalCallback, this);
   goal_pos_sub_ = node_handle.subscribe("/goal", 1, &APFJointVelocity::goalPosCallback, this);
   // subscribe to the planning scene information and wait for the first received message
   planning_scene_sub_ = node_handle.subscribe("/planning_scene", 1, &APFJointVelocity::planningSceneCallback, this);
   
   // wait until first message received from all subscribers
   ros::Rate rate(10);
-  while (ros::ok() && (obstacles_.empty() || targeted_velocity_ == Eigen::Vector3d(-100,-100,-100) || distance_to_goal_ == -100)) {
+  while (ros::ok() && (obstacles_.empty())) {
       ros::spinOnce();
       ROS_INFO_STREAM_THROTTLE(1, controller_name << ": Waiting for first of all messages...");
       rate.sleep();
@@ -134,14 +134,14 @@ void APFJointVelocity::goalPosCallback(const geometry_msgs::PoseStamped::ConstPt
   ROS_INFO_STREAM("Goal Orientation: " << goal_orientation_.coeffs().transpose());
 }
 
-void APFJointVelocity::targetedVelocityCallback(const geometry_msgs::TwistStamped::ConstPtr& msg) 
-{
-  targeted_velocity_ = Eigen::Vector3d(msg->twist.linear.x, msg->twist.linear.y, msg->twist.linear.z);
-}
+// void APFJointVelocity::targetedVelocityCallback(const geometry_msgs::TwistStamped::ConstPtr& msg) 
+// {
+//   targeted_velocity_ = Eigen::Vector3d(msg->twist.linear.x, msg->twist.linear.y, msg->twist.linear.z);
+// }
 
-void APFJointVelocity::distanceToGoalCallback(const std_msgs::Float64::ConstPtr& msg) {
-  distance_to_goal_ = msg->data;
-}
+// void APFJointVelocity::distanceToGoalCallback(const std_msgs::Float64::ConstPtr& msg) {
+//   distance_to_goal_ = msg->data;
+// }
 
 void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& period) 
 {
@@ -172,7 +172,7 @@ void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& p
   Eigen::Vector3d ee_pos = T_ee.block<3,1>(0,3);
   Eigen::Vector3d diff = goal_pos_ - ee_pos;
 
-  double kp = 2.0;
+  double kp = 3.0;
   double kv = 2.0;
   double Vmax = 0.1; 
   Eigen::Vector3d xdot_d = (kp / kv) * diff;
@@ -204,9 +204,9 @@ void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& p
       Eigen::Vector3d diff_ee = ee_pos - obs_center;
       double dist = diff_ee.norm();
       double real_d = dist - r;
-      double d_thresh = 0.2; 
+      double d_thresh = 0.12; 
       if(real_d < d_thresh && real_d>1e-3){
-        double k_rep = 1.0;
+        double k_rep = 0.8;
         double rep_val = k_rep*(1.0/real_d - 1.0/d_thresh)/(real_d*real_d);
         repulsive += rep_val*(diff_ee/dist);
       }
@@ -291,7 +291,7 @@ void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& p
   // --------------------------------main task + minor task -----------------------------------
   Eigen::VectorXd dq = dq_main + dq_j3; // + dq_ori;
 
-  if(distance_to_goal_ > 0.01)
+  if(diff.norm() > 0.01)
   {
     for(int i=0; i<dim_q_; i++)
     {
