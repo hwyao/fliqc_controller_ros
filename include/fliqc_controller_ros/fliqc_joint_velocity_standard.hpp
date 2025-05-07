@@ -76,6 +76,9 @@ class FLIQCJointVelocityStandard : public controller_interface::MultiInterfaceCo
   // the parameters for the controller
   double position_convergence_threshold_ = 0.005;
   double velocity_convergence_threshold_ = 0.05;
+  double switch_to_disable_multi_agent_  = 0.025;
+  double robust_pinv_lambda_ = 0.001;
+  double velocity_input_threshold_ = 0.05;
 };
 
 }  // namespace fliqc_controller_ros

@@ -116,6 +116,12 @@ bool FLIQCJointVelocityStandard::init(hardware_interface::RobotHW* robot_hardwar
       "/fliqc_controller_ros/velocity_convergence_threshold", velocity_convergence_threshold_);
   READ_PARAM(node_handle, controller_name,
       "/fliqc_controller_ros/diagnostic_period", diagnostic_period);
+  READ_PARAM(node_handle, controller_name,
+      "/fliqc_controller_ros/switch_to_disable_multi_agent", switch_to_disable_multi_agent_);
+  READ_PARAM(node_handle, controller_name,
+      "/fliqc_controller_ros/robust_pinv_lambda", robust_pinv_lambda_);
+  READ_PARAM(node_handle, controller_name,
+      "/fliqc_controller_ros/velocity_input_threshold", velocity_input_threshold_);
 
   // Initialize the robot environment evaluator in robot_env_evaluator
   pinocchio::Model model;
@@ -310,15 +316,21 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
   // if you don't have either of them, just wait to be r🦍d by the compiler :P
   Eigen::Vector3d targeted_velocity = targeted_velocity_;         
   Eigen::Vector3d goal_diff = goal_position_ - now_; 
-  Eigen::Vector3d goal_diff_regularized = targeted_velocity; // = targeted_velocity_;
-  double vel = 0.05;
-  if (goal_diff_regularized.norm() > (vel/0.5)){
-    goal_diff_regularized = goal_diff_regularized.normalized() * 0.05;
+  Eigen::Vector3d goal_diff_regularized = Eigen::Vector3d::Zero();
+  if (goal_diff.norm() >= switch_to_disable_multi_agent_){
+    goal_diff_regularized = targeted_velocity;  // = targeted_velocity_;
+  } else{
+    goal_diff_regularized = goal_diff;
+  }
+  if (goal_diff_regularized.norm() > velocity_input_threshold_){
+    goal_diff_regularized = goal_diff_regularized.normalized() * velocity_input_threshold_;
   } else {
-    goal_diff_regularized = goal_diff * 0.5;
+    goal_diff_regularized = goal_diff;
   }
   Eigen::MatrixXd Jpos = J.block<3, 7>(0, 0);
-  q_dot_guide = Jpos.jacobiSvd(Eigen::ComputeThinU | Eigen::ComputeThinV).solve(goal_diff_regularized);
+  Eigen::MatrixXd JJt = Jpos * Jpos.transpose();
+  Eigen::MatrixXd damped_identity = robust_pinv_lambda_ * robust_pinv_lambda_ * Eigen::MatrixXd::Identity(JJt.rows(), JJt.cols());
+  q_dot_guide = Jpos.transpose() * (JJt + damped_identity).ldlt().solve(goal_diff_regularized);
   DBGNPROF_STOP_CLOCK("kinematics");
   //ROS_INFO_STREAM_THROTTLE(1, controller_name << ": goal_diff is " << goal_diff.transpose()); // wanna try it huh？ :D
 
