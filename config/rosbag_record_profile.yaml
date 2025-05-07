@@ -1,5 +1,6 @@
 debug_and_profile_helper:
   record_list:
+    - "/diagnostics"
     - "/joint_states"
     - "/debug_and_profile_helper/CLK_kinematics"
     - "/debug_and_profile_helper/CLK_computeDistances"

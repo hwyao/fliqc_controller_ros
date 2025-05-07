@@ -158,6 +158,8 @@ target_link_libraries(validate_kinematics PUBLIC
 ## in contrast to setup.py, you can choose the destination
 catkin_install_python(PROGRAMS
   scripts/launch_simulation.py
+  scripts/automatic_start_stop_simulation.py
+  scripts/run_benchmark.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
