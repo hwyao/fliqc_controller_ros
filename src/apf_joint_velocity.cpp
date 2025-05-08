@@ -205,7 +205,8 @@ void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& p
     qdot_joint(i) = velocity_joint_handles_[i].getVelocity();
   }
 
-  //STEP 1 - use env_evaluator to calculate FK and jacobian 
+  //STEP 1 - use env_evaluator to calculate FK and jacobian
+  DBGNPROF_START_CLOCK;
   Eigen::Matrix4d T_ee = Eigen::Matrix4d::Identity();
   Eigen::MatrixXd J_full_ee(6, dim_q_);
   env_evaluator_ptr_->forwardKinematics(q, T_ee); // default argument is -1 (EE)
@@ -261,24 +262,24 @@ void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& p
   }
 
   //---------------------Rotational Attractive Force--------------------------
-  Eigen::Matrix3d R_ee = T_ee.block<3,3>(0,0);
-  Eigen::Quaterniond q_curr(R_ee);
+  // Eigen::Matrix3d R_ee = T_ee.block<3,3>(0,0);
+  // Eigen::Quaterniond q_curr(R_ee);
 
-  double p0 = q_curr.w();
-  Eigen::Vector3d pim = q_curr.vec();
-  double pg0 = goal_orientation_.w();
-  Eigen::Vector3d pgim = goal_orientation_.vec();
+  // double p0 = q_curr.w();
+  // Eigen::Vector3d pim = q_curr.vec();
+  // double pg0 = goal_orientation_.w();
+  // Eigen::Vector3d pgim = goal_orientation_.vec();
 
-  Eigen::Vector3d orientation_error = p0 * pgim - pg0 * pim - pim.cross(pgim);
+  // Eigen::Vector3d orientation_error = p0 * pgim - pg0 * pim - pim.cross(pgim);
 
-  double k_att_r = 2.0; // orientation position gain
-  double k_vel_r = 1.0; // orientation velocity gain
-  double w_max = 0.5;   // max angular velocity
+  // double k_att_r = 2.0; // orientation position gain
+  // double k_vel_r = 1.0; // orientation velocity gain
+  // double w_max = 0.5;   // max angular velocity
 
-  Eigen::Vector3d w_d = (k_att_r / k_vel_r) * orientation_error;
-  double nu_r = std::min(1.0, w_max / (w_d.norm() + 1e-6)); 
-  Eigen::Vector3d f_vlcr = k_vel_r * nu_r * w_d; // rotational attraction
-  Eigen::VectorXd dq_ori = J_full_ee.block(3, 0, 3, dim_q_).transpose() * f_vlcr;
+  // Eigen::Vector3d w_d = (k_att_r / k_vel_r) * orientation_error;
+  // double nu_r = std::min(1.0, w_max / (w_d.norm() + 1e-6)); 
+  // Eigen::Vector3d f_vlcr = k_vel_r * nu_r * w_d; // rotational attraction
+  // Eigen::VectorXd dq_ori = J_full_ee.block(3, 0, 3, dim_q_).transpose() * f_vlcr;
 
 // ------------------------------------EE main task -----------------------------------
   Eigen::Vector3d combined_vel_ee = attract + repulsive;
@@ -341,7 +342,14 @@ void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& p
   //STEP 4 - calculate the joint velocity command
   // --------------------------------main task + minor task -----------------------------------
   Eigen::VectorXd dq = dq_main + dq_j3; // + dq_ori; 
+  DBGNPROF_STOP_CLOCK("runController");
 
+  #if defined(CONTROLLER_DEBUG) || defined(CONTROLLER_PROFILE)
+  DBGNPROF_LOG("q_dot_real", qdot_joint);
+  DBGNPROF_LOG("q_dot_command", dq);
+  #endif // CONTROLLER_DEBUG
+
+  //STEP 5 - send the joint velocity command to the robot
   // Update diagnostics
   position_error_norm_ = diff.norm();
   velocity_norm_ = qdot_joint.norm();

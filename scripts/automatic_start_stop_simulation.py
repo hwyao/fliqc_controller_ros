@@ -56,6 +56,7 @@ def start_simulation():
     # Check for required parameters in args
     try:
         param_env_scene = args['env_scene']
+        param_controller = args['controller']
         param_record_bag_path = args['rosbag_record_path']
         param_record_bag_name = args['rosbag_record_name']
     except KeyError as e:
@@ -64,7 +65,7 @@ def start_simulation():
 
     # Launch the simulation
     package = 'fliqc_controller_ros'
-    launch_file = 'sim_fliqc_joint_velocity_standard_benchmark_log.launch'
+    launch_file = 'sim_collect_benchmark.launch'
 
     # Retrieve uuid and configure logging
     uuid = roslaunch.rlutil.get_or_generate_uuid(None, False)
@@ -75,11 +76,13 @@ def start_simulation():
     launch_args = ['robot:=panda', 
                    'arm_id:=panda', 
                    'env_scene:=' + param_env_scene,
+                   'controller:=' + param_controller,
                    'record_bag_path:=' + param_record_bag_path,
                    'record_bag_name:=' + param_record_bag_name]
     roslaunch_file = [(launch_file, launch_args)]  
 
     rospy.loginfo(f"[launch_simulation_node] Launching file: {roslaunch_file}")
+    rospy.loginfo(f"[launch_simulation_node] Arguments: {launch_args}")
 
     # Create a roslaunch parent and start it
     parent = roslaunch.parent.ROSLaunchParent(uuid, roslaunch_file)

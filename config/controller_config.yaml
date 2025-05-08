@@ -151,3 +151,16 @@ apf_joint_velocity_debug:
         - $(arg arm_id)_joint5
         - $(arg arm_id)_joint6
         - $(arg arm_id)_joint7
+
+apf_joint_velocity_profile:
+    type: fliqc_controller_ros/APFJointVelocityProfile
+    arm_id: $(arg arm_id)
+    robot_preset: panda
+    joint_names:
+        - $(arg arm_id)_joint1
+        - $(arg arm_id)_joint2
+        - $(arg arm_id)_joint3
+        - $(arg arm_id)_joint4
+        - $(arg arm_id)_joint5
+        - $(arg arm_id)_joint6
+        - $(arg arm_id)_joint7

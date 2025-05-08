@@ -1,11 +1,13 @@
 <?xml version="1.0" ?>
 <launch>
   <arg name="env_scene" doc="Name of the environment scene to load."/>
+  <arg name="controller" doc="Name of the controller to use."/>
   <arg name="rosbag_record_path" doc="Path to save the rosbag."/>
   <arg name="rosbag_record_name" doc="Name of the rosbag."/>
 
   <node pkg="fliqc_controller_ros" type="automatic_start_stop_simulation.py" output="screen" name="automatic_start_stop_simulation">
     <param name="env_scene" value="$(arg env_scene)"/>
+    <param name="controller" value="$(arg controller)"/>
     <param name="rosbag_record_path" value="$(arg rosbag_record_path)"/>
     <param name="rosbag_record_name" value="$(arg rosbag_record_name)"/>
   </node>

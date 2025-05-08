@@ -23,6 +23,7 @@ for env_scene in ENV_SCENES:
             f"rosbag_record_path:={ROSBAG_RECORD_PATH}",
             f"rosbag_record_name:={rosbag_record_name}",
             f"env_scene:={env_scene}"
+            f"controller:=fliqc_joint_velocity_standard",
         ]
         print(f"Running: {' '.join(command)}")
         try:
