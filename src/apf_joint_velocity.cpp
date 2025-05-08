@@ -334,7 +334,7 @@ void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& p
   // Joint 3 pinv
   Eigen::MatrixXd JJt_j3 = J_j3 * J_j3.transpose();
   Eigen::MatrixXd damped_identity_j3 = robust_pinv_lambda_ * robust_pinv_lambda_ * Eigen::MatrixXd::Identity(JJt_j3.rows(), JJt_j3.cols());
-  Eigen::VectorXd dq_j3 = N_ee * J_ee.transpose() * (JJt_j3 + damped_identity_j3).ldlt().solve(F_rep_j3);
+  Eigen::VectorXd dq_j3 = N_ee * J_j3.transpose() * (JJt_j3 + damped_identity_j3).ldlt().solve(F_rep_j3);
   // Eigen::MatrixXd J_j3_pinv = J_j3.jacobiSvd(Eigen::ComputeThinU|Eigen::ComputeThinV).solve(Eigen::MatrixXd::Identity(3,3));
   // Eigen::VectorXd dq_j3 = N_ee * (J_j3_pinv * F_rep_j3);
 
