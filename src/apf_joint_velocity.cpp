@@ -35,20 +35,17 @@ bool APFJointVelocity::init(hardware_interface::RobotHW* robot_hardware, ros::No
   READ_PARAM(node_handle, controller_name, "arm_id", arm_id);
 
   std::vector<std::string> joint_names;
-  READ_PARAM_SILENT(node_handle, controller_name, "joint_names", joint_names);
+  READ_PARAM_VECTOR(node_handle, controller_name, "joint_names", joint_names);
   
   dim_q_ = joint_names.size();
 
   // Get the control interface of the robot joints
   auto velocity_joint_interface_ = robot_hardware->get<hardware_interface::VelocityJointInterface>();
-
   CHECK_NOT_NULLPTR(controller_name, velocity_joint_interface_);
-
   velocity_joint_handles_.resize(dim_q_);
-
-  for (size_t i = 0; i < dim_q_; ++i) 
-  {
-    CATCH_BLOCK(controller_name,velocity_joint_handles_[i] = velocity_joint_interface_->getHandle(joint_names[i]);
+  for (size_t i = 0; i < dim_q_; ++i) {
+    CATCH_BLOCK(controller_name,
+      velocity_joint_handles_[i] = velocity_joint_interface_->getHandle(joint_names[i]);
     );
   }
 
@@ -65,18 +62,16 @@ bool APFJointVelocity::init(hardware_interface::RobotHW* robot_hardware, ros::No
 
   env_evaluator_ptr_ = std::make_unique<robot_env_evaluator::RobotEnvEvaluator>(model, ee_name_preset, joint_names_preset, collision_model);
 
-  // subscribe to the targeted velocity and goal to distance from the multi-agent system
-  //targeted_velocity_sub_ = node_handle.subscribe("/agent_twist_global", 1, &APFJointVelocity::targetedVelocityCallback, this);
-  //dist_to_goal_sub_ = node_handle.subscribe("/distance_to_goal", 1, &APFJointVelocity::distanceToGoalCallback, this);
-  goal_pos_sub_ = node_handle.subscribe("/goal", 1, &APFJointVelocity::goalPosCallback, this);
   // subscribe to the planning scene information and wait for the first received message
   planning_scene_sub_ = node_handle.subscribe("/planning_scene", 1, &APFJointVelocity::planningSceneCallback, this);
+  goal_pos_sub_ = node_handle.subscribe("/goal", 1, &APFJointVelocity::goalPosCallback, this);
   
-  // wait until first message received from all subscribers
+  // wait until first message received from necessary subscribers
   ros::Rate rate(10);
-  while (ros::ok() && (obstacles_.empty())) {
+  while (ros::ok() && (!(first_receive_obstacle_ && first_receive_goal_))) {
       ros::spinOnce();
-      ROS_INFO_STREAM_THROTTLE(1, controller_name << ": Waiting for first of all messages...");
+      ROS_INFO_STREAM_THROTTLE(1, controller_name << ": Waiting for messages... scene: [" << first_receive_obstacle_ << 
+                                                                              "] goal: [" << first_receive_goal_ << "]");
       rate.sleep();
   }
 
@@ -113,6 +108,8 @@ void APFJointVelocity::planningSceneCallback(const moveit_msgs::PlanningScene::C
         ROS_ERROR_STREAM("The obstacle type " << obj.primitives[0].type << "of object " << obj.id << " is not supported.");
       }
   }
+
+  if(first_receive_obstacle_ == false){ first_receive_obstacle_ = true; }
 }
 
 void APFJointVelocity::goalPosCallback(const geometry_msgs::PoseStamped::ConstPtr& msg)
@@ -128,27 +125,16 @@ void APFJointVelocity::goalPosCallback(const geometry_msgs::PoseStamped::ConstPt
       msg->pose.orientation.x,
       msg->pose.orientation.y,
       msg->pose.orientation.z);
-
-  // Log the goal position and orientation
-  ROS_INFO_STREAM("Goal Position: " << goal_pos_.transpose());
-  ROS_INFO_STREAM("Goal Orientation: " << goal_orientation_.coeffs().transpose());
+  
+  if(first_receive_goal_ == false){ first_receive_goal_ = true; }
 }
 
-// void APFJointVelocity::targetedVelocityCallback(const geometry_msgs::TwistStamped::ConstPtr& msg) 
-// {
-//   targeted_velocity_ = Eigen::Vector3d(msg->twist.linear.x, msg->twist.linear.y, msg->twist.linear.z);
-// }
-
-// void APFJointVelocity::distanceToGoalCallback(const std_msgs::Float64::ConstPtr& msg) {
-//   distance_to_goal_ = msg->data;
-// }
 
 void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& period) 
 {
   elapsed_time_ += period;
 
   //STEP 0 - get current joint position and velocity
-
   Eigen::VectorXd q(dim_q_);
   Eigen::VectorXd qdot_joint(dim_q_);
 
@@ -216,9 +202,6 @@ void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& p
   //---------------------Rotational Attractive Force--------------------------
   Eigen::Matrix3d R_ee = T_ee.block<3,3>(0,0);
   Eigen::Quaterniond q_curr(R_ee);
-  // To do : get it from topic
-  //Eigen::Quaterniond q_goal(0.96593, 0.25882, 0.0, 0.0);
-  //Eigen::Quaterniond q_goal(1, 0.0, 0.0, 0.0);
 
   double p0 = q_curr.w();
   Eigen::Vector3d pim = q_curr.vec();
@@ -236,11 +219,14 @@ void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& p
   Eigen::Vector3d f_vlcr = k_vel_r * nu_r * w_d; // rotational attraction
   Eigen::VectorXd dq_ori = J_full_ee.block(3, 0, 3, dim_q_).transpose() * f_vlcr;
 
-
-  Eigen::Vector3d combined_vel_ee = attract + repulsive;
-
 // ------------------------------------EE main task -----------------------------------
-  Eigen::VectorXd dq_main = J_ee.jacobiSvd(Eigen::ComputeThinU | Eigen::ComputeThinV).solve(combined_vel_ee);
+  Eigen::Vector3d combined_vel_ee = attract + repulsive;
+  //ROS_INFO_STREAM_THROTTLE(1, "Combined velocity: " << combined_vel_ee.transpose());
+
+  Eigen::MatrixXd JJt_ee = J_ee * J_ee.transpose();
+  Eigen::MatrixXd damped_identity_ee = robust_pinv_lambda_ * robust_pinv_lambda_ * Eigen::MatrixXd::Identity(JJt_ee.rows(), JJt_ee.cols());
+  Eigen::VectorXd dq_main = J_ee.transpose() * (JJt_ee + damped_identity_ee).ldlt().solve(combined_vel_ee);
+  //Eigen::VectorXd dq_main = J_ee.jacobiSvd(Eigen::ComputeThinU | Eigen::ComputeThinV).solve(combined_vel_ee);
 
   Eigen::MatrixXd J_ee_pinv = J_ee.jacobiSvd(Eigen::ComputeThinU|Eigen::ComputeThinV).solve(Eigen::MatrixXd::Identity(3,3));
   Eigen::MatrixXd N_ee = Eigen::MatrixXd::Identity(dim_q_, dim_q_) - J_ee_pinv * J_ee;
@@ -258,7 +244,6 @@ void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& p
 
 
   // Joint 3 repulsive force from the obstacles
-
   Eigen::Vector3d F_rep_j3(0,0,0);
   {
     std::lock_guard<std::mutex> lock(obstacles_mutex_);
@@ -266,7 +251,7 @@ void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& p
     {
       Eigen::Vector3d obs_center = obs.obstacle_pose.block<3,1>(0,3);
       //double r = obs.obstacle.radius;
-      double r = 0.05;
+      double r = 0.2;
       Eigen::Vector3d diff_j3 = j3_pos - obs_center;
       double dist = diff_j3.norm();
       double real_d = dist - r;
@@ -283,27 +268,30 @@ void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& p
 
 
   // Joint 3 pinv
-  Eigen::MatrixXd J_j3_pinv = J_j3.jacobiSvd(Eigen::ComputeThinU|Eigen::ComputeThinV).solve(Eigen::MatrixXd::Identity(3,3));
-
-  Eigen::VectorXd dq_j3 = N_ee * (J_j3_pinv * F_rep_j3);
+  Eigen::MatrixXd JJt_j3 = J_j3 * J_j3.transpose();
+  Eigen::MatrixXd damped_identity_j3 = robust_pinv_lambda_ * robust_pinv_lambda_ * Eigen::MatrixXd::Identity(JJt_j3.rows(), JJt_j3.cols());
+  Eigen::VectorXd dq_j3 = N_ee * J_ee.transpose() * (JJt_j3 + damped_identity_j3).ldlt().solve(F_rep_j3);
+  // Eigen::MatrixXd J_j3_pinv = J_j3.jacobiSvd(Eigen::ComputeThinU|Eigen::ComputeThinV).solve(Eigen::MatrixXd::Identity(3,3));
+  // Eigen::VectorXd dq_j3 = N_ee * (J_j3_pinv * F_rep_j3);
 
   //STEP 4 - calculate the joint velocity command
   // --------------------------------main task + minor task -----------------------------------
-  Eigen::VectorXd dq = dq_main + dq_j3; // + dq_ori;
-
-  if(diff.norm() > 0.01)
+  Eigen::VectorXd dq = dq_main + dq_j3; // + dq_ori; 
+  for(int i=0; i<dim_q_; i++)
   {
-    for(int i=0; i<dim_q_; i++)
-    {
-      velocity_joint_handles_[i].setCommand(dq(i));
-    }
-  } else 
-  {
-    // when reached 
-    for(int i=0; i<dim_q_; i++){
-      velocity_joint_handles_[i].setCommand(0.0);
-    }
+    velocity_joint_handles_[i].setCommand(dq(i));
   }
+
+  // if(diff.norm() > 0.01)
+  // {
+
+  // } else 
+  // {
+  //   // when reached 
+  //   for(int i=0; i<dim_q_; i++){
+  //     velocity_joint_handles_[i].setCommand(0.0);
+  //   }
+  // }
   
 }
 

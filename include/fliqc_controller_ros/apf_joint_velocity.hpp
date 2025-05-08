@@ -40,22 +40,29 @@ class APFJointVelocity : public controller_interface::MultiInterfaceController<
   std::unique_ptr<robot_env_evaluator::RobotEnvEvaluator> env_evaluator_ptr_;
 
   int dim_q_; //< The dimension of the joint q 
-
-  // the obstacle list
-  std::vector<robot_env_evaluator::obstacleInput> obstacles_;
+  
   // the subscriber list
-  ros::Subscriber targeted_velocity_sub_;
-  ros::Subscriber dist_to_goal_sub_;
   ros::Subscriber planning_scene_sub_;
   ros::Subscriber goal_pos_sub_; 
-  // the targeted velocity and distance to goal
-  // Eigen::Vector3d targeted_velocity_ = Eigen::Vector3d(-100,-100,-100);
-  // double distance_to_goal_ = -100;
-
-  Eigen::Vector3d goal_pos_ = Eigen::Vector3d::Zero(); // store goal pos 
-  Eigen::Quaterniond  goal_orientation_ = Eigen::Quaterniond(1, 0.0, 0.0, 0.0); // store goal orientation
+  
+  // the subscriber variables
+  std::vector<robot_env_evaluator::obstacleInput> obstacles_;
+  bool first_receive_obstacle_ = false;
+  Eigen::Vector3d goal_pos_ = Eigen::Vector3d::Zero(); 
+  Eigen::Quaterniond  goal_orientation_ = Eigen::Quaterniond(1, 0.0, 0.0, 0.0);
+  bool first_receive_goal_ = false;
+  
   // the mutex for the obstacles
   std::mutex obstacles_mutex_;
+
+  // state and diagnostics variables
+  double position_error_norm_ = 100.0;
+  double velocity_norm_ = 0.0;
+
+  // the parameters for the controller
+  double position_convergence_threshold_ = 0.005;
+  double velocity_convergence_threshold_ = 0.05;
+  double robust_pinv_lambda_ = 0.004;
 };
 
 }  // namespace fliqc_controller_ros
