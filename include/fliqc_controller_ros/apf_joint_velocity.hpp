@@ -9,6 +9,7 @@
 #include <controller_interface/multi_interface_controller.h>
 #include <hardware_interface/joint_command_interface.h>
 #include <hardware_interface/robot_hw.h>
+#include <diagnostic_updater/diagnostic_updater.h>
 
 #include <FLIQC_controller_core/FLIQC_controllers.hpp>
 #include <robot_env_evaluator/robot_env_evaluator.hpp>
@@ -30,14 +31,16 @@ class APFJointVelocity : public controller_interface::MultiInterfaceController<
   void stopping(const ros::Time&) override;
 
   void planningSceneCallback(const moveit_msgs::PlanningScene::ConstPtr& msg);
-  void targetedVelocityCallback(const geometry_msgs::TwistStamped::ConstPtr& msg);
-  void distanceToGoalCallback(const std_msgs::Float64::ConstPtr& msg);
   void goalPosCallback(const geometry_msgs::PoseStamped::ConstPtr& msg);
+
+  void checkPositionConvergence(diagnostic_updater::DiagnosticStatusWrapper &stat);
+  void checkVelocityConvergence(diagnostic_updater::DiagnosticStatusWrapper &stat);
  private:
   std::vector<hardware_interface::JointHandle> velocity_joint_handles_;
   ros::Duration elapsed_time_;
 
   std::unique_ptr<robot_env_evaluator::RobotEnvEvaluator> env_evaluator_ptr_;
+  std::unique_ptr<diagnostic_updater::Updater> diag_updater_;
 
   int dim_q_; //< The dimension of the joint q 
   

@@ -21,15 +21,25 @@
 #include <visualization_msgs/MarkerArray.h>
 #include <visualization_msgs/Marker.h>
 #include <geometry_msgs/Point.h>
+#define DBGNPROF_USE_ROS
+#define DBGNPROF_ENABLE_DEBUG
 #endif // CONTROLLER_DEBUG
+
+#ifdef CONTROLLER_PROFILE
+#define DBGNPROF_USE_ROS
+#define DBGNPROF_ENABLE_DEBUG
+#define DBGNPROF_ENABLE_PROFILE
+#endif // CONTROLLER_PROFILE
+
+#include <debug_and_profile_helper/helper_macros.hpp>
 
 namespace fliqc_controller_ros {
 
+// Set the variables for this controller
+static std::string controller_name = "APFJointVelocity";
+
 bool APFJointVelocity::init(hardware_interface::RobotHW* robot_hardware, ros::NodeHandle& node_handle) 
 {
-  // Set the variables for this controller
-  std::string controller_name = "APFJointVelocity";
-                                            
   // Get robot arm id, joint names and EE names parameters
   std::string arm_id;
   READ_PARAM(node_handle, controller_name, "arm_id", arm_id);
@@ -75,8 +85,27 @@ bool APFJointVelocity::init(hardware_interface::RobotHW* robot_hardware, ros::No
       rate.sleep();
   }
 
-  ROS_INFO_STREAM(controller_name << "is initialized with " << dim_q_ << " joints.");
+  // Cold start the controller
+  Eigen::VectorXd q = Eigen::VectorXd::Zero(dim_q_);
+  for (size_t i = 0; i < dim_q_; ++i) {
+    q(i) = velocity_joint_handles_[i].getPosition();
+  }
+  Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
+  env_evaluator_ptr_ -> forwardKinematics(q, T);
+  Eigen::Vector3d now_ = T.block<3, 1>(0, 3);
+  position_error_norm_ = (goal_pos_ - now_).norm();
+  velocity_norm_ = 0.0;
 
+  // Initialize diagnostic updater
+  ros::NodeHandle ph("~");
+  ph.setParam("diagnostic_period", 0.05);
+  diag_updater_ = std::make_unique<diagnostic_updater::Updater>(ros::NodeHandle(), ph, ros::this_node::getName());
+  diag_updater_->setHardwareID(arm_id);
+  diag_updater_->add("Position convergence", this, &APFJointVelocity::checkPositionConvergence);
+  diag_updater_->add("Velocity convergence", this, &APFJointVelocity::checkVelocityConvergence);
+  diag_updater_->update();
+
+  ROS_INFO_STREAM(controller_name << "is initialized with " << dim_q_ << " joints.");
   return true;
 }
 
@@ -129,6 +158,25 @@ void APFJointVelocity::goalPosCallback(const geometry_msgs::PoseStamped::ConstPt
   if(first_receive_goal_ == false){ first_receive_goal_ = true; }
 }
 
+void APFJointVelocity::checkPositionConvergence(diagnostic_updater::DiagnosticStatusWrapper &stat) {
+  if (position_error_norm_ < position_convergence_threshold_) {
+    stat.summary(diagnostic_msgs::DiagnosticStatus::OK, "Position convergence");
+  } else {
+    stat.summary(diagnostic_msgs::DiagnosticStatus::WARN, "Position not converged");
+  }
+  stat.add("Position error norm", position_error_norm_);
+  stat.add("Position convergence threshold", position_convergence_threshold_);
+}
+
+void APFJointVelocity::checkVelocityConvergence(diagnostic_updater::DiagnosticStatusWrapper &stat) {
+  if (velocity_norm_ < velocity_convergence_threshold_) {
+    stat.summary(diagnostic_msgs::DiagnosticStatus::OK, "Velocity convergence");
+  } else {
+    stat.summary(diagnostic_msgs::DiagnosticStatus::WARN, "Velocity not converged");
+  }
+  stat.add("Velocity norm", velocity_norm_);
+  stat.add("Velocity convergence threshold", velocity_convergence_threshold_);
+}
 
 void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& period) 
 {
@@ -158,7 +206,7 @@ void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& p
   Eigen::Vector3d ee_pos = T_ee.block<3,1>(0,3);
   Eigen::Vector3d diff = goal_pos_ - ee_pos;
 
-  double kp = 3.0;
+  double kp = 2.0;
   double kv = 2.0;
   double Vmax = 0.1; 
   Eigen::Vector3d xdot_d = (kp / kv) * diff;
@@ -277,21 +325,20 @@ void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& p
   //STEP 4 - calculate the joint velocity command
   // --------------------------------main task + minor task -----------------------------------
   Eigen::VectorXd dq = dq_main + dq_j3; // + dq_ori; 
+
+  // Update diagnostics
+  position_error_norm_ = diff.norm();
+  velocity_norm_ = qdot_joint.norm();
+  diag_updater_->update();
+
   for(int i=0; i<dim_q_; i++)
   {
     velocity_joint_handles_[i].setCommand(dq(i));
   }
-
-  // if(diff.norm() > 0.01)
-  // {
-
-  // } else 
-  // {
-  //   // when reached 
-  //   for(int i=0; i<dim_q_; i++){
-  //     velocity_joint_handles_[i].setCommand(0.0);
-  //   }
-  // }
+  if (position_error_norm_ <= position_convergence_threshold_ && velocity_norm_ <= velocity_convergence_threshold_) {
+    ROS_INFO_STREAM_THROTTLE(1, controller_name << ": Goal reached with tolerance [" << position_error_norm_ << 
+                                                                 "], and velocity [" << velocity_norm_ << "]");
+  }
   
 }
 
