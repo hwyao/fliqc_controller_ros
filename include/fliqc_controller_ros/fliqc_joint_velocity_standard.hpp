@@ -51,16 +51,14 @@ class FLIQCJointVelocityStandard : public controller_interface::MultiInterfaceCo
 
   int dim_q_;                          ///< The dimension of the joint q 
 
-  // the obstacle list
-  std::vector<robot_env_evaluator::obstacleInput> obstacles_;
-
   // the subscriber list
   ros::Subscriber targeted_velocity_sub_;
   ros::Subscriber planning_scene_sub_;
   ros::Subscriber goal_sub_;
 
-  // the subscriber variables, targeted velocity and distance to goal
+  // the subscriber variables: the obstacle list, targeted velocity and goal
   Eigen::Vector3d targeted_velocity_ = Eigen::Vector3d::Zero(); 
+  std::vector<robot_env_evaluator::obstacleInput> obstacles_;
   bool first_receive_obstacle_ = false;
   Eigen::Vector3d goal_position_ = Eigen::Vector3d::Zero();
   bool first_receive_goal_ = false;

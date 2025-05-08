@@ -151,10 +151,10 @@ bool FLIQCJointVelocityStandard::init(hardware_interface::RobotHW* robot_hardwar
     )
   }
 
-  // subscribe to the targeted velocity and goal to distance from the multi-agent system
+  // subscribe to the targeted velocity from the multi-agent system
   targeted_velocity_sub_ = node_handle.subscribe("/agent_twist_global", 1, &FLIQCJointVelocityStandard::targetedVelocityCallback, this);
 
-  // subscribe to the planning scene information and wait for the first received message
+  // subscribe to the planning scene and environment information
   planning_scene_sub_ = node_handle.subscribe("/planning_scene", 1, &FLIQCJointVelocityStandard::planningSceneCallback, this, ros::TransportHints().unreliable());
   goal_sub_ = node_handle.subscribe("/goal", 1, &FLIQCJointVelocityStandard::goalPoseCallback, this, ros::TransportHints().unreliable());
 
@@ -167,7 +167,7 @@ bool FLIQCJointVelocityStandard::init(hardware_interface::RobotHW* robot_hardwar
   first_receive_goal_ = false;
   obstacles_.clear();
 
-  // wait until first message received from all subscribers
+  // wait until first message received from necessary subscribers
   ros::Rate rate(10);
   while (ros::ok() && !(first_receive_obstacle_ && first_receive_goal_)) {
       ROS_INFO_STREAM_THROTTLE(1, controller_name << ": Waiting for messages... scene: [" << first_receive_obstacle_ << 
