@@ -42,6 +42,16 @@ fliqc_controller_ros:
 fliqc_controller_joint_velocity_standard:
     switch_to_disable_multi_agent: 0.05
 
+apf_controller_joint_velocity:
+    attraction_kp: 4.0
+    repulsion_agent_r: 0.05
+    repulsion_kp: 0.8
+    repulsion_dist: 0.12
+    repulsion_wholebody_kp: 1.5
+    repulsion_wholebody_dist: 0.3
+    regularization_vmax: 0.1
+    regularization_kv: 2.0
+
 robot_env_evaluator:
     calculate_self_collision: false
     projector_dist_to_control_enable: true

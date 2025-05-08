@@ -88,6 +88,24 @@ bool APFJointVelocity::init(hardware_interface::RobotHW* robot_hardware, ros::No
       "/fliqc_controller_ros/robust_pinv_lambda", robust_pinv_lambda_);
   READ_PARAM(node_handle, controller_name,
       "/fliqc_controller_ros/velocity_input_threshold", velocity_input_threshold_);
+
+  // Get controller parameters: APF parameters
+  READ_PARAM(node_handle, controller_name,
+      "/apf_controller_joint_velocity/attraction_kp", attraction_kp_);
+  READ_PARAM(node_handle, controller_name,
+      "/apf_controller_joint_velocity/repulsion_agent_r", repulsion_agent_r_);
+  READ_PARAM(node_handle, controller_name,
+      "/apf_controller_joint_velocity/repulsion_kp", repulsion_kp_);
+  READ_PARAM(node_handle, controller_name,
+      "/apf_controller_joint_velocity/repulsion_dist", repulsion_dist_);
+  READ_PARAM(node_handle, controller_name,
+        "/apf_controller_joint_velocity/repulsion_wholebody_kp", repulsion_wholebody_kp_);
+  READ_PARAM(node_handle, controller_name,
+      "/apf_controller_joint_velocity/repulsion_wholebody_dist", repulsion_wholebody_dist_);
+  READ_PARAM(node_handle, controller_name,
+      "/apf_controller_joint_velocity/regularization_kv", regularization_kv_);
+  READ_PARAM(node_handle, controller_name,
+      "/apf_controller_joint_velocity/regularization_vmax", regularization_vmax_);
   
   // wait until first message received from necessary subscribers
   ros::Rate rate(10);
@@ -220,14 +238,11 @@ void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& p
   Eigen::Vector3d ee_pos = T_ee.block<3,1>(0,3);
   Eigen::Vector3d diff = goal_pos_ - ee_pos;
 
-  double kp = 2.0;
-  double kv = 2.0;
-  double Vmax = 0.1; 
-  Eigen::Vector3d xdot_d = (kp / kv) * diff;
+  Eigen::Vector3d xdot_d = (attraction_kp_ / regularization_kv_) * diff;
   Eigen::Vector3d xdot = J_ee * qdot_joint;
 
-  double nu = std ::min(1.0, Vmax / (std::sqrt(xdot_d.transpose() * xdot_d) + 1e-6));
-  Eigen::Vector3d attract = -kv * (xdot - nu * xdot_d);
+  double nu = std ::min(1.0, regularization_vmax_ / (std::sqrt(xdot_d.transpose() * xdot_d) + 1e-6));
+  Eigen::Vector3d attract = -regularization_kv_ * (xdot - nu * xdot_d);
   // simple realization of attraction force
   // double k_att = 2.0; 
 
@@ -246,16 +261,12 @@ void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& p
     std::lock_guard<std::mutex> lock(obstacles_mutex_);
     for(const auto& obs : obstacles_)
     {
-      
       Eigen::Vector3d obs_center = obs.obstacle_pose.block<3,1>(0,3);
-      double r = 0.05;
       Eigen::Vector3d diff_ee = ee_pos - obs_center;
       double dist = diff_ee.norm();
-      double real_d = dist - r;
-      double d_thresh = 0.12; 
-      if(real_d < d_thresh && real_d>1e-3){
-        double k_rep = 0.8;
-        double rep_val = k_rep*(1.0/real_d - 1.0/d_thresh)/(real_d*real_d);
+      double real_d = dist - repulsion_agent_r_;
+      if(real_d < repulsion_dist_ && real_d>1e-3){
+        double rep_val = repulsion_kp_*(1.0/real_d - 1.0/repulsion_dist_)/(real_d*real_d);
         repulsive += rep_val*(diff_ee/dist);
       }
     }
@@ -316,16 +327,14 @@ void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& p
     {
       Eigen::Vector3d obs_center = obs.obstacle_pose.block<3,1>(0,3);
       //double r = obs.obstacle.radius;
-      double r = 0.2;
       Eigen::Vector3d diff_j3 = j3_pos - obs_center;
       double dist = diff_j3.norm();
-      double real_d = dist - r;
-      double d_thresh = 0.2; 
+      double real_d = dist - repulsion_agent_r_;
 
-      if(real_d < d_thresh && real_d>1e-5)
+      if(real_d < repulsion_wholebody_dist_ && real_d>1e-5)
       {
         double k_rep = 1.0; 
-        double rep_val = k_rep * (1.0/real_d - 1.0/d_thresh)/(real_d*real_d);
+        double rep_val = repulsion_wholebody_kp_ * (1.0/real_d - 1.0/repulsion_wholebody_dist_)/(real_d*real_d);
         F_rep_j3 += rep_val*(diff_j3/dist);
       }
     }

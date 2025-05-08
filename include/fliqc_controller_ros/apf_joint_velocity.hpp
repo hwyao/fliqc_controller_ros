@@ -67,6 +67,16 @@ class APFJointVelocity : public controller_interface::MultiInterfaceController<
   double velocity_convergence_threshold_ = 0.05;
   double robust_pinv_lambda_ = 0.004;
   double velocity_input_threshold_ = 0.05;
+
+  // the parameters for the potential field
+  double attraction_kp_ = 3.0;
+  double repulsion_agent_r_ = 0.05;
+  double repulsion_kp_ = 0.8;
+  double repulsion_dist_ = 0.12;
+  double repulsion_wholebody_kp_ = 1.0;
+  double repulsion_wholebody_dist_ = 0.2;
+  double regularization_vmax_ = 0.1;
+  double regularization_kv_ = 2.0;
 };
 
 }  // namespace fliqc_controller_ros
