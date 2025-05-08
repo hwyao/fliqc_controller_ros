@@ -384,7 +384,9 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
       DBGNPROF_STOP_CLOCK("runController");
 
     } catch (const FLIQC_controller_core::LCQPowException& e) {
+      DBGNPROF_STOP_CLOCK("runController");
       error_flag_ = true;
+      diag_updater_->force_update();
       ROS_ERROR_STREAM_ONCE(controller_name << ": LCQPowException caught during runController:\n" << e.what());
   
       try {
@@ -406,6 +408,7 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
         time_stream << std::put_time(std::localtime(&time_t_now), "%Y-%m-%d_%H-%M-%S-%Z");
         std::string base_dir = log_dir + "/" + time_stream.str() + "_" + controller_name;
         std::filesystem::create_directories(base_dir);
+        ROS_INFO_STREAM("Log is saved in directory: " << base_dir);
   
         // Create subdirectories for different types of logs
         FLIQC_controller_core::logLCQPowExceptionAsFile(e, base_dir);
@@ -415,9 +418,11 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
       }
     } catch (const std::exception& e) {
       error_flag_ = true;
+      diag_updater_->force_update();
       ROS_ERROR_STREAM(controller_name << ": std::exception caught during runController:\n" << e.what());
     } catch (...) {
       error_flag_ = true;
+      diag_updater_->force_update();
       ROS_ERROR_STREAM(controller_name << ": Unknown exception caught during runController.");
     }
   }

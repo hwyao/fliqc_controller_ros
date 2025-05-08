@@ -9,7 +9,7 @@ import time
 is_error_detected = False
 is_position_convergence = False
 is_velocity_convergence = False
-MAX_RUNTIME = 60  # Maximum runtime in seconds
+MAX_RUNTIME = 30  # Maximum runtime in seconds
 
 def diagnostics_callback(msg, parent):
     global is_position_convergence, is_velocity_convergence, is_error_detected
@@ -34,10 +34,13 @@ def diagnostics_callback(msg, parent):
                     if is_velocity_convergence:
                         rospy.loginfo("[launch_simulation_node] Velocity convergence lost.")
                     is_velocity_convergence = False
-            elif status.name == 'gazebo: Controller running':
+
+            elif status.name == 'gazebo: Controller state':
                 if status.level == 2:
                     is_error_detected = True
-                    rospy.logwarn("[launch_simulation_node] Error detected in controller.")
+                    rospy.logwarn("[launch_simulation_node] Error detected, shutting down...")
+                    parent.shutdown()
+                    rospy.signal_shutdown("Node shutdown because of error condition.")
                 else:
                     is_error_detected = False
 
@@ -99,12 +102,6 @@ def start_simulation():
     try:
         while not rospy.is_shutdown():
             global is_position_convergence, is_velocity_convergence, is_error_detected
-
-            # Check for error condition
-            if is_error_detected:
-                rospy.logwarn("[launch_simulation_node] Error detected, shutting down...")
-                parent.shutdown()
-                rospy.signal_shutdown("Node shutdown because of error condition.")
 
             # Check for position and velocity convergence
             if is_position_convergence and is_velocity_convergence:

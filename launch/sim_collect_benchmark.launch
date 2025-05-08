@@ -29,7 +29,7 @@
     <param name="controller" value="$(arg controller)_profile"/>
   </node>
   
-  <node pkg="multi_agent_vector_fields" type="multi_agent_feedback_node_launcher.py" output="screen" name="multi_agent_feedback_node_launcher">
+  <node pkg="multi_agent_vector_fields" type="multi_agent_feedback_node_launcher.py" output="screen" name="multi_agent_feedback_node_launcher" unless="$(eval arg ('controller') == 'apf_apf_joint_velocity')">
     <param name="env_scene" value="$(arg env_scene)"/>
   </node>
 
