@@ -3,10 +3,48 @@ import subprocess
 import datetime
 
 # Constants
-ROSBAG_RECORD_PATH = "/home/geriatronics/FLIQC_example_workspace_ros/src/fliqc_controller_ros/benchmark/data-202505071512"
+ROSBAG_RECORD_PATH = "/home/geriatronics/FLIQC_example_workspace_ros/src/fliqc_controller_ros/benchmark/data-202505080942"
 ENV_SCENES = ["figureA1_11.yaml",
-              "figureB2_11.yaml",]
-NUM_RUNNING = 2
+              "figureA1_12.yaml",
+              "figureA1_13.yaml",
+              "figureA1_14.yaml",
+              "figureA1_15.yaml",
+              "figureA1_16.yaml",
+              "figureA1_17.yaml",
+              "figureA1_18.yaml",
+              "figureA1_19.yaml",
+              "figureA1_20.yaml",
+              "figureA1_21.yaml",
+              "figureA1_22.yaml",
+              "figureA1_23.yaml",
+              "figureA1_24.yaml",
+              "figureA1_25.yaml",
+              "figureA1_26.yaml",
+              "figureA1_27.yaml",
+              "figureA1_28.yaml",
+              "figureA1_29.yaml",
+              "figureA1_30.yaml",
+              "figureB2_11.yaml",
+              "figureB2_12.yaml",
+              "figureB2_13.yaml",
+              "figureB2_14.yaml",
+              "figureB2_15.yaml",
+              "figureB2_16.yaml",
+              "figureB2_17.yaml",
+              "figureB2_18.yaml",
+              "figureB2_19.yaml",
+              "figureB2_20.yaml",
+              "figureB2_21.yaml",
+              "figureB2_22.yaml",
+              "figureB2_23.yaml",
+              "figureB2_24.yaml",
+              "figureB2_25.yaml",
+              "figureB2_26.yaml",
+              "figureB2_27.yaml",
+              "figureB2_28.yaml",
+              "figureB2_29.yaml",
+              "figureB2_30.yaml",]
+NUM_RUNNING = 20
 CONTROLLER = ["fliqc_joint_velocity_standard",
               "apf_joint_velocity",]
 
