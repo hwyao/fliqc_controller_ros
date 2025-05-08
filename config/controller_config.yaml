@@ -36,9 +36,11 @@ fliqc_controller_ros:
     position_convergence_threshold: 0.005
     velocity_convergence_threshold: 0.05
     diagnostic_period: 0.05
-    switch_to_disable_multi_agent: 0.05
-    velocity_input_threshold: 0.05
     robust_pinv_lambda: 0.004
+    velocity_input_threshold: 0.05
+
+fliqc_controller_joint_velocity_standard:
+    switch_to_disable_multi_agent: 0.05
 
 robot_env_evaluator:
     calculate_self_collision: false

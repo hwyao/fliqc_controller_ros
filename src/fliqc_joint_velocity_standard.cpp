@@ -117,11 +117,13 @@ bool FLIQCJointVelocityStandard::init(hardware_interface::RobotHW* robot_hardwar
   READ_PARAM(node_handle, controller_name,
       "/fliqc_controller_ros/diagnostic_period", diagnostic_period);
   READ_PARAM(node_handle, controller_name,
-      "/fliqc_controller_ros/switch_to_disable_multi_agent", switch_to_disable_multi_agent_);
-  READ_PARAM(node_handle, controller_name,
       "/fliqc_controller_ros/robust_pinv_lambda", robust_pinv_lambda_);
   READ_PARAM(node_handle, controller_name,
       "/fliqc_controller_ros/velocity_input_threshold", velocity_input_threshold_);
+
+  // Get controller parameters: fliqc_controller_joint_velocity_standard parameters
+  READ_PARAM(node_handle, controller_name,
+      "/fliqc_controller_joint_velocity_standard/switch_to_disable_multi_agent", switch_to_disable_multi_agent_);
 
   // Initialize the robot environment evaluator in robot_env_evaluator
   pinocchio::Model model;
@@ -324,8 +326,6 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
   }
   if (goal_diff_regularized.norm() > velocity_input_threshold_){
     goal_diff_regularized = goal_diff_regularized.normalized() * velocity_input_threshold_;
-  } else {
-    goal_diff_regularized = goal_diff;
   }
   Eigen::MatrixXd Jpos = J.block<3, 7>(0, 0);
   Eigen::MatrixXd JJt = Jpos * Jpos.transpose();

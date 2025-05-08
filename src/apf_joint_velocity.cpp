@@ -75,6 +75,19 @@ bool APFJointVelocity::init(hardware_interface::RobotHW* robot_hardware, ros::No
   // subscribe to the planning scene information and wait for the first received message
   planning_scene_sub_ = node_handle.subscribe("/planning_scene", 1, &APFJointVelocity::planningSceneCallback, this);
   goal_pos_sub_ = node_handle.subscribe("/goal", 1, &APFJointVelocity::goalPosCallback, this);
+
+  // Get controller parameters: fliqc_controller_ros parameters
+  double diagnostic_period;
+  READ_PARAM(node_handle, controller_name,
+      "/fliqc_controller_ros/position_convergence_threshold", position_convergence_threshold_);
+  READ_PARAM(node_handle, controller_name,
+      "/fliqc_controller_ros/velocity_convergence_threshold", velocity_convergence_threshold_);
+  READ_PARAM(node_handle, controller_name,
+      "/fliqc_controller_ros/diagnostic_period", diagnostic_period);
+  READ_PARAM(node_handle, controller_name,
+      "/fliqc_controller_ros/robust_pinv_lambda", robust_pinv_lambda_);
+  READ_PARAM(node_handle, controller_name,
+      "/fliqc_controller_ros/velocity_input_threshold", velocity_input_threshold_);
   
   // wait until first message received from necessary subscribers
   ros::Rate rate(10);
@@ -98,7 +111,7 @@ bool APFJointVelocity::init(hardware_interface::RobotHW* robot_hardware, ros::No
 
   // Initialize diagnostic updater
   ros::NodeHandle ph("~");
-  ph.setParam("diagnostic_period", 0.05);
+  ph.setParam("diagnostic_period", diagnostic_period);
   diag_updater_ = std::make_unique<diagnostic_updater::Updater>(ros::NodeHandle(), ph, ros::this_node::getName());
   diag_updater_->setHardwareID(arm_id);
   diag_updater_->add("Position convergence", this, &APFJointVelocity::checkPositionConvergence);
@@ -269,6 +282,9 @@ void APFJointVelocity::update(const ros::Time& /* time */,const ros::Duration& p
 
 // ------------------------------------EE main task -----------------------------------
   Eigen::Vector3d combined_vel_ee = attract + repulsive;
+  if (combined_vel_ee.norm() > velocity_input_threshold_){
+    combined_vel_ee = combined_vel_ee.normalized() * velocity_input_threshold_;
+  }
   //ROS_INFO_STREAM_THROTTLE(1, "Combined velocity: " << combined_vel_ee.transpose());
 
   Eigen::MatrixXd JJt_ee = J_ee * J_ee.transpose();
