@@ -3,10 +3,15 @@
   <arg name="robot" default="panda" doc="choose your robot. Possible values: [panda, fr3]"/>
   <arg name="arm_id" default="$(arg robot)" />
   <arg name="env_scene" default="obstacles_example_dynamic.yaml" doc="The environment scene to load for the simulation."/>
+  <arg name="controller"/>
+  <arg name="record_bag_path"/>
+  <arg name="record_bag_name"/>
 
   <rosparam param="use_sim_time">true</rosparam>
   <rosparam command="load" file="$(find fliqc_controller_ros)/config/controller_config.yaml" subst_value="true" />
   <rosparam command="load" file="$(find fliqc_controller_ros)/config/rosbag_record_profile.yaml" subst_value="true" />
+  <rosparam param="/debug_and_profile_helper/record_bag_path" subst_value="true">$(arg record_bag_path)</rosparam>
+  <rosparam param="/debug_and_profile_helper/record_bag_name" subst_value="true">$(arg record_bag_name)</rosparam>
 
   <node pkg="debug_and_profile_helper" type="record_as_rosbag.py" name="record_as_rosbag" output="screen" required="true">
     <param name="allow_overwrite" value="true"/>
@@ -21,12 +26,12 @@
     <param name="robot" value="$(arg robot)"/>
     <param name="arm_id" value="$(arg arm_id)"/>
     <param name="env_scene" value="$(arg env_scene)"/>
-    <param name="controller" value="fliqc_joint_velocity_standard_profile"/>
+    <param name="controller" value="$(arg controller)_profile"/>
   </node>
   
-  <node pkg="multi_agent_vector_fields" type="multi_agent_feedback_node_launcher.py" output="screen" name="multi_agent_feedback_node_launcher">
+  <node pkg="multi_agent_vector_fields" type="multi_agent_feedback_node_launcher.py" output="screen" name="multi_agent_feedback_node_launcher" unless="$(eval arg ('controller') == 'apf_apf_joint_velocity')">
     <param name="env_scene" value="$(arg env_scene)"/>
   </node>
 
-  <node pkg="rviz" type="rviz" output="screen" name="rviz" args="-d $(find fliqc_controller_ros)/launch/sim_fliqc_joint_velocity_standard_debug.rviz -f $(arg arm_id)_link0 --splash-screen $(find franka_visualization)/splash.png"/>
+  <!-- <node pkg="rviz" type="rviz" output="screen" name="rviz" args="-d $(find fliqc_controller_ros)/launch/sim_fliqc_joint_velocity_standard_debug.rviz -f $(arg arm_id)_link0 -/-splash-screen $(find franka_visualization)/splash.png"/> -->
 </launch>

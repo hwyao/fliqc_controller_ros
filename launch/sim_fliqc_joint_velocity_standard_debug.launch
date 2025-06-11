@@ -8,6 +8,7 @@
   
   <include file="$(find robot_env_publisher)/launch/file_env_node.launch">
     <arg name="env_scene" value="$(arg env_scene)"/>
+    <arg name="frequency" value="1000"/>
   </include>
 
   <node pkg="fliqc_controller_ros" type="launch_simulation.py" output="screen" name="launch_simulation">

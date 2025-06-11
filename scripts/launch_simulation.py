@@ -82,11 +82,11 @@ def main():
     package = 'fliqc_controller_ros'
     launch_file = 'gazebo_sim.launch'
     
-    # Create a roslaunch parent
+    # Retrieve uuid and configure logging
     uuid = roslaunch.rlutil.get_or_generate_uuid(None, False)
     roslaunch.configure_logging(uuid)
 
-    # Create the launch file with arguments
+    # Create the launch path with arguments
     launch_file = roslaunch.rlutil.resolve_launch_arguments([package, launch_file])[0]
     launch_args = ['robot:=' + param_robot, 
                    'arm_id:=' + param_arm_id, 
@@ -98,7 +98,7 @@ def main():
 
     rospy.loginfo(f"[launch_simulation_node] Launching file: {roslaunch_file}")
 
-    # Start the launch file
+    # Create a roslaunch parent and start it
     parent = roslaunch.parent.ROSLaunchParent(uuid, roslaunch_file)
     parent.start()
 
