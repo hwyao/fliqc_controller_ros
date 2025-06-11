@@ -9,7 +9,7 @@ import time
 is_error_detected = False
 is_position_convergence = False
 is_velocity_convergence = False
-MAX_RUNTIME = 30  # Maximum runtime in seconds
+MAX_RUNTIME = 60  # Maximum runtime in seconds
 
 def diagnostics_callback(msg, parent):
     global is_position_convergence, is_velocity_convergence, is_error_detected
