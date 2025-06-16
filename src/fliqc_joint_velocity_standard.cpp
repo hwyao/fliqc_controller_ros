@@ -1,3 +1,10 @@
+/**
+ * @file fliqc_joint_velocity_standard.cpp
+ * @brief Implementation file for the FLIQCJointVelocityStandard controller class.
+ * 
+ * Copyright (c) 2025, Haowen Yao
+ * Use of this source code is governed by the MIT license, see LICENSE.
+ */
 #include <pinocchio/parsers/urdf.hpp>
 #include <pinocchio/parsers/srdf.hpp>
 #include <pinocchio/algorithm/model.hpp>

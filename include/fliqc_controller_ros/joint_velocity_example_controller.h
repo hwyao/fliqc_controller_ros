@@ -1,3 +1,6 @@
+// This file is copied from the franka_ros's franka_example_controllers package
+// Copyright (c) 2023 Franka Robotics GmbH
+// Use of this source code is governed by the Apache-2.0 license, see LICENSE
 #pragma once
 
 #include <string>

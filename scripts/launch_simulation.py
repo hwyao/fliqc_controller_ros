@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+"""
+launch_simulation.py
+Author: Haowen Yao
+This script is a ROS node designed to launch a Gazebo simulation for a specified robot configuration.
+Usage:
+    Run this script as a ROS node, ensuring all required parameters are set in the private namespace.
+"""
 import roslaunch
 import rospy
 from rospkg import RosPack

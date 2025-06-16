@@ -1,3 +1,6 @@
+// This file is copied and modified from the franka_ros's franka_example_controllers package
+// Copyright (c) 2023 Franka Robotics GmbH
+// Use of this source code is governed by the Apache-2.0 license, see LICENSE
 #include <fliqc_controller_ros/joint_velocity_example_controller.h>
 
 #include <cmath>

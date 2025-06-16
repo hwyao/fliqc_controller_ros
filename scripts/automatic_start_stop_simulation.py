@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+"""
+automatic_start_stop_simulation.py
+Author: Haowen Yao
+This script is a ROS node designed to automatically start and stop a Gazebo simulation 
+based on convergence conditions and error states.
+Usage:
+    Run this script as a ROS node, ensuring all required parameters are set in the private namespace.
+"""
 import rospy
 import roslaunch
 from rospkg import RosPack

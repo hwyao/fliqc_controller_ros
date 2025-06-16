@@ -1,3 +1,10 @@
+/**
+ * @file fliqc_joint_velocity_no_env_node.hpp
+ * @brief Header file for the FLIQCJointVelocityNoEnvNode controller class.
+ * 
+ * Copyright (c) 2025, Haowen Yao
+ * Use of this source code is governed by the MIT license, see LICENSE.
+ */
 #pragma once
 
 #include <string>

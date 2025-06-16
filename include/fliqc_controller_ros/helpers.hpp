@@ -1,3 +1,11 @@
+/**
+ * @file fliqc_state_source_bridge.hpp
+ * @brief Header file for the FrankaModelInterfaceBridge class, which provides an 
+ * interface to robot_env_evaluator::KinematicDataBridge
+ * 
+ * Copyright (c) 2025, Haowen Yao
+ * Use of this source code is governed by the MIT license, see LICENSE.
+ */
 #ifndef FLIQC_CONTROLLER_ROS_HELPERS_HPP_
 #define FLIQC_CONTROLLER_ROS_HELPERS_HPP_
 

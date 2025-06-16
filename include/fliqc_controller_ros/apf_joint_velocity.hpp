@@ -1,3 +1,10 @@
+/**
+ * @file apf_joint_velocity.hpp
+ * @brief Header file for the APFJointVelocity controller class.
+ *
+ * Copyright (c) 2025, Bingkun Huang, Haowen Yao
+ * Use of this source code is governed by the MIT license, see LICENSE.
+ */
 #pragma once
 
 #include <string>
