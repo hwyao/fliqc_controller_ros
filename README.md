@@ -5,6 +5,7 @@ The ROS package `fliqc_controller_ros` provides a controller with FLIQC controll
 - The complete simulation - profiling - real robot workflow for writing a controller.
 - The ability to automatically start and stop controller for full automatic data collection.
 
+![fliqc_controller_ros](./image/README-fliqc_controller_ros.drawio.png)
 
 ## Installation
 
@@ -73,15 +74,19 @@ Notice:
 
 ### Profiling a controller with data collection
 
-![FLIQC controller profile](./image/diagnostics.gif)
 For profiling a controller, you can use the `_profile` suffix to the controller name. For example, to profile the `fliqc_joint_velocity_standard` controller, you can use the following command:
 ```bash
 roslaunch fliqc_controller_ros sim_fliqc_joint_velocity_standard_profile.launch env_scene:=<scene_name>
 ```
 
-A rosbag will be recorded and saved. The topic to be recorded, and the folders and the file names to save the rosbag are defined in the `config/rosbag_record_config.yaml` file. If `record_bag_path` is not assigned (like now default), the rosbag will be saved in `recordings` of the `debug_and_profile_helper` package(! Not this package).
+A rosbag will be recorded and saved. The topic to be recorded, and the folders and the file names to save the rosbag are defined in the `config/rosbag_record_config.yaml` file. If `record_bag_path` is not assigned (like now default), the rosbag will be saved in `recordings` of the `debug_and_profile_helper` package(❗Not this package).
+
+![data_inspection](./image/data_inspection.gif)
+You can use bag visualizers like [rqt_bag](https://wiki.ros.org/rqt_bag) or [plotjuggler](https://github.com/facontidavide/PlotJuggler) to visualize the data in the rosbag.
 
 ### Automatic start and end controller to collect data
+
+![FLIQC controller profile](./image/diagnostics.gif)
 
 The controller uses `diagnostic` package to publish its distance to target and current velocity as a part of the diagnostic message. This allows the controller to be checked for true convergence: the distance error and velocity error should be both below a certain threshold. 
 
