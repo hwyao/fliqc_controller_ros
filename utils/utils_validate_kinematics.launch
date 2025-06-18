@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<launch>
+    <arg name="robot" default="panda" doc="choose your robot. Possible values: [panda, fr3]"/>
+    <arg name="arm_id" default="$(arg robot)" />
+    <arg name="use_gui" default="false" />
+
+    <param name="robot_description" command="$(find xacro)/xacro $(find franka_description)/robots/$(arg robot)/$(arg robot).urdf.xacro hand:=true arm_id:=$(arg arm_id)"/>
+   
+    <rosparam param="use_sim_time">false</rosparam>
+
+    <node name="validate_kinematics" pkg="fliqc_controller_ros" type="validate_kinematics" output="screen" unless="$(arg use_gui)" /> <!--launch-prefix="valgrind leak-check=full"-->
+    <node name="joint_state_publisher_gui" pkg="joint_state_publisher_gui" type="joint_state_publisher_gui" output="screen" if="$(arg use_gui)" />	    
+    
+    <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" />
+
+    <node name="rviz" pkg="rviz" type="rviz" args="-d $(find fliqc_controller_ros)/utils/validate_kinematics.rviz" required="true" />
+</launch>

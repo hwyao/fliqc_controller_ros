@@ -1,0 +1,26 @@
+<?xml version="1.0" ?>
+<launch>
+  <arg name="robot" default="panda" doc="choose your robot. Possible values: [panda, fr3]"/>
+  <arg name="arm_id" default="$(arg robot)" />
+  <arg name="env_scene" default="obstacles_example_dynamic.yaml" doc="The environment scene to load for the simulation."/>
+
+  <rosparam command="load" file="$(find fliqc_controller_ros)/config/controller_config.yaml" subst_value="true" />
+  
+  <include file="$(find robot_env_publisher)/launch/file_env_node.launch">
+    <arg name="env_scene" value="$(arg env_scene)"/>
+    <arg name="frequency" value="1000"/>
+  </include>
+
+  <node pkg="fliqc_controller_ros" type="launch_simulation.py" output="screen" name="launch_simulation">
+    <param name="robot" value="$(arg robot)"/>
+    <param name="arm_id" value="$(arg arm_id)"/>
+    <param name="env_scene" value="$(arg env_scene)"/>
+    <param name="controller" value="fliqc_joint_velocity_standard"/>
+  </node>
+
+  <node pkg="multi_agent_vector_fields" type="multi_agent_feedback_node_launcher.py" output="screen" name="multi_agent_feedback_node_launcher">
+    <param name="env_scene" value="$(arg env_scene)"/>
+  </node>
+
+  <node pkg="rviz" type="rviz" output="screen" name="rviz" args="-d $(find fliqc_controller_ros)/launch/sim_fliqc_joint_velocity_standard_debug.rviz -f $(arg arm_id)_link0 --splash-screen $(find franka_visualization)/splash.png"/>
+</launch>
