@@ -1,8 +1,8 @@
 [submodule "submodule/FLIQC_controller_core"]
 	path = submodule/FLIQC_controller_core
 	url = https://github.com/hwyao/FLIQC_controller_core
-	branch = develop
+	branch = main
 [submodule "submodule/robot_env_evaluator"]
 	path = submodule/robot_env_evaluator
 	url = https://github.com/riddhiman13/robot_env_evaluator
-	branch = develop
+	branch = main

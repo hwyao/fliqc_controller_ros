@@ -1,19 +1,21 @@
 # fliqc_controller_ros
 
-The ROS package `fliqc_controller_ros` provides a controller with FLIQC controller. It is designed to have:
+The ROS package `fliqc_controller_ros` provides a controller with FLIQC controller. It wraps over the [FLIQC_controller_core](https://github.com/hwyao/FLIQC_controller_core) package.
+
+It is designed to have:
 - include 'FLIQC_controller_core' and 'robot_env_evaluator' as submodules to provide necessary functionalities for a complete controller.
 - The complete simulation - profiling - real robot workflow for writing a controller.
 - The ability to automatically start and stop controller for full automatic data collection.
 
 ![fliqc_controller_ros](./image/README-fliqc_controller_ros.drawio.png)
 
-## Installation
+## ⬇️ Installation
 
 It is strongly suggested to install this package from the whole example repository [FLIQC_example_workspace_ros](https://github.com/hwyao/FLIQC_example_workspace_ros), which contains all the submodule for this repository. Using this repository alone will not allow some of the controller to run properly, since it need some other ROS packages. Even if you want to setup your own workspace, it is still suggested to start from the `FLIQC_example_workspace_ros` repository.
 
-## Quick start
+## ▶️ Quick start
 
-This assumes that you are running in [FLIQC_example_workspace_ros](https://github.com/hwyao/FLIQC_example_workspace_ros) workspace to avoid potential missing dependencies.
+This assumes that you are running in [FLIQC_example_workspace_ros](https://github.com/hwyao/FLIQC_example_workspace_ros) workspace to avoid potential missing dependencies. Here, no installation process is introduced. 
 
 You should compile the entire workspace first WITH Release FLAG(❗):
 ```bash
@@ -50,6 +52,8 @@ roslaunch fliqc_controller_ros sim_fliqc_joint_velocity_no_env_node.launch
 
 ### FLIQC++ controller (FLIQC + multi_agent + robot_env_evaluator)
 ![FLIQC controller no env](./image/fliqc_standard.gif)
+🟢 This is the main controller we are experimenting with.
+
 Simulation:
 ```bash
 roslaunch fliqc_controller_ros sim_fliqc_joint_velocity_standard.launch env_scene:=<scene_name>
@@ -60,7 +64,7 @@ The scene name can be found in the `scene` folder of the `robot_env_evaluator` p
 
 ### Debugging a controller by with detailed visualization
 ![FLIQC controller no env](./image/fliqc_standard_debug.gif)
-✅ This mode is suggested to use by the simluation development of the controller, unless you are caring about the timing of the controller. 
+🟢 This mode is suggested to use by the simluation development of the controller, unless you are caring about the timing of the controller. 
 
 For most controllers, you can use the debug mode by adding a `_debug` suffix to the controller name. For example, to debug the `fliqc_joint_velocity_standard` controller, you can use the following command:
 ```bash
@@ -94,7 +98,7 @@ For a single test, you can use the script `sim_automatic_run_benchmark.launch` t
 
 For a batch run, you can try to modify the `run_benchmark.py`, which is simpily combining different runs of the `sim_automatic_run_benchmark.launch` script. 
 
-## Additional information
+## ℹ️ Additional information
 
 ### How to play with different configurations 
 
