@@ -6,3 +6,6 @@
 	path = submodule/robot_env_evaluator
 	url = https://github.com/riddhiman13/robot_env_evaluator
 	branch = main
+[submodule "submodule/realtime_calc_thread_pool"]
+	path = submodule/realtime_calc_thread_pool
+	url = https://github.com/hwyao/realtime_calc_thread_pool
