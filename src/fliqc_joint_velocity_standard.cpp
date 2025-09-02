@@ -152,6 +152,10 @@ bool FLIQCJointVelocityStandard::init(hardware_interface::RobotHW* robot_hardwar
     "/robot_env_evaluator/projector_dist_to_control_with_zero_orientation", env_evaluator_ptr_->projector_dist_to_control_with_zero_orientation_);
   READ_PARAM(node_handle, controller_name,
     "/robot_env_evaluator/robust_pinv_lambda", env_evaluator_ptr_->robust_pinv_lambda_);
+  READ_PARAM(node_handle, controller_name,
+    "/robot_env_evaluator/enable_broad_phase_search", env_evaluator_ptr_->broad_phase_search_enable_);
+  READ_PARAM(node_handle, controller_name,
+    "/robot_env_evaluator/broad_phase_collision_padding", env_evaluator_ptr_->broad_phase_collision_padding_);
   if (preset->isFrankaRobot()){
     franka_hw::FrankaModelInterface* model_interface_ = robot_hardware->get<franka_hw::FrankaModelInterface>();
     CHECK_NOT_NULLPTR(controller_name, model_interface_);
@@ -521,6 +525,11 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
         }
         visualization_msgs::MarkerArray obs_marker_array;
         geometry_msgs::Point point_helper;
+        
+        // Track previous number of markers to handle shrinking arrays
+        static size_t prev_markers_used = 0;
+        size_t current_markers = distances.size();
+        
         for (size_t i = 0; i < distances.size(); ++i){
           // nearest point on object
           visualization_msgs::Marker nearest_point_marker;
@@ -621,6 +630,35 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
           }
           obs_marker_array.markers.push_back(normal_vector_marker);
         }
+        
+        // If current number of markers is less than previous, delete the excess markers
+        if (current_markers < prev_markers_used) {
+          for (size_t i = current_markers; i < prev_markers_used; ++i) {
+            // Delete markers for each namespace
+            visualization_msgs::Marker delete_marker;
+            delete_marker.header.frame_id = "panda_link0";
+            delete_marker.header.stamp = ros::Time::now();
+            delete_marker.action = visualization_msgs::Marker::DELETE;
+            delete_marker.id = i;
+            
+            // Delete from each namespace
+            delete_marker.ns = "env_info_obs";
+            obs_marker_array.markers.push_back(delete_marker);
+            
+            delete_marker.ns = "env_info_rbt";
+            obs_marker_array.markers.push_back(delete_marker);
+            
+            delete_marker.ns = "env_info_connection";
+            obs_marker_array.markers.push_back(delete_marker);
+            
+            delete_marker.ns = "env_info_normal";
+            obs_marker_array.markers.push_back(delete_marker);
+          }
+        }
+        
+        // Update previous markers count
+        prev_markers_used = current_markers;
+        
         obs_pub.publish(obs_marker_array);
       }
     } while(false);

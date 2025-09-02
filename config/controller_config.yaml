@@ -57,6 +57,8 @@ robot_env_evaluator:
     projector_dist_to_control_enable: true
     projector_dist_to_control_with_zero_orientation: false
     robust_pinv_lambda: 0.001
+    enable_broad_phase_search: true
+    broad_phase_collision_padding: 0.055            # broad_phase_collision_padding larger than active_threshold, otherwise incontinous
 
 fliqc_joint_velocity_no_env_node:
     type: fliqc_controller_ros/FLIQCJointVelocityNoEnvNode
