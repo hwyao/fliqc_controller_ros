@@ -28,9 +28,9 @@ fliqc_controller_core:
     enable_nullspace_projector_in_A: true
     dt: 0.06
     eps: 0.02
-    active_threshold: 0.04
+    active_threshold: 0.04                 # active_threshold larger than eps, otherwise infeasible
     q_dot_max: [2.1750, 2.1750, 2.1750, 2.1750, 2.6100, 2.6100, 2.6100]   # [rad/s]
-    weight_on_mass_matrix: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+    weight_on_mass_matrix: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]   # experimential, do not suggest to change
 
 fliqc_controller_ros:
     position_convergence_threshold: 0.005
