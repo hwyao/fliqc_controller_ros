@@ -38,6 +38,13 @@ fliqc_controller_ros:
     diagnostic_period: 0.05
     robust_pinv_lambda: 0.004
     velocity_input_threshold: 0.05
+    record_fliqc_throw_as_text: false      # suggested to be false when thread pool is enabled, otherwise will be flooded.
+    enable_realtime_thread_pool: true
+    realtime_thread_pool_config:
+        max_threads: 4
+        rt_priority: 50
+        rt_affinity: [8, 9, 12, 13]
+    realtime_thread_pool_wait_us: 300
 
 fliqc_controller_joint_velocity_standard:
     switch_to_disable_multi_agent: 0.05
@@ -88,6 +95,19 @@ fliqc_joint_velocity_no_env_node_debug:
 
 fliqc_joint_velocity_no_env_node_profile:
     type: fliqc_controller_ros/FLIQCJointVelocityNoEnvNodeProfile
+    arm_id: $(arg arm_id)
+    robot_preset: panda
+    joint_names:
+        - $(arg arm_id)_joint1
+        - $(arg arm_id)_joint2
+        - $(arg arm_id)_joint3
+        - $(arg arm_id)_joint4
+        - $(arg arm_id)_joint5
+        - $(arg arm_id)_joint6
+        - $(arg arm_id)_joint7
+
+fliqc_joint_velocity_no_env_node_realtime_profile:
+    type: fliqc_controller_ros/FLIQCJointVelocityNoEnvNodeRealtimeProfile
     arm_id: $(arg arm_id)
     robot_preset: panda
     joint_names:
