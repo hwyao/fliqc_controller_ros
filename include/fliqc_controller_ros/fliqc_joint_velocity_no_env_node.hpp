@@ -95,7 +95,11 @@ class FLIQCJointVelocityNoEnvNode : public controller_interface::MultiInterfaceC
   bool enable_realtime_thread_pool_ = true;
   int realtime_thread_pool_size_ = 4;
   int realtime_thread_priority_ = 50;
+  int realtime_main_priority_ = 98;
   std::vector<int> realtime_thread_affinity_ = {};
+  int realtime_main_affinity_ = 0;
+  bool require_thread_rt_priority_ = false;
+  bool require_main_rt_priority_ = true;
   int realtime_thread_pool_wait_us_ = 300;
 };
 

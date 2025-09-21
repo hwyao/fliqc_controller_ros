@@ -140,9 +140,17 @@ bool FLIQCJointVelocityNoEnvNode::init(hardware_interface::RobotHW* robot_hardwa
   READ_PARAM(node_handle, controller_name,
       "/fliqc_controller_ros/realtime_thread_pool_config/max_threads", realtime_thread_pool_size_);
   READ_PARAM(node_handle, controller_name,
-      "/fliqc_controller_ros/realtime_thread_pool_config/rt_priority", realtime_thread_priority_);
+      "/fliqc_controller_ros/realtime_thread_pool_config/thread_rt_priority", realtime_thread_priority_);
+  READ_PARAM(node_handle, controller_name,
+      "/fliqc_controller_ros/realtime_thread_pool_config/main_rt_priority", realtime_main_priority_);
   READ_PARAM_VECTOR(node_handle, controller_name,
-      "/fliqc_controller_ros/realtime_thread_pool_config/rt_affinity", realtime_thread_affinity_);
+      "/fliqc_controller_ros/realtime_thread_pool_config/thread_affinity", realtime_thread_affinity_);
+  READ_PARAM(node_handle, controller_name,
+      "/fliqc_controller_ros/realtime_thread_pool_config/main_affinity", realtime_main_affinity_);
+  READ_PARAM(node_handle, controller_name,
+      "/fliqc_controller_ros/realtime_thread_pool_config/require_thread_rt_priority", require_thread_rt_priority_);
+  READ_PARAM(node_handle, controller_name,
+      "/fliqc_controller_ros/realtime_thread_pool_config/require_main_rt_priority", require_main_rt_priority_);
   READ_PARAM(node_handle, controller_name,
       "/fliqc_controller_ros/realtime_thread_pool_wait_us", realtime_thread_pool_wait_us_);
 
@@ -194,9 +202,11 @@ bool FLIQCJointVelocityNoEnvNode::init(hardware_interface::RobotHW* robot_hardwa
     realtime_calc_thread_pool::Config realtime_config(
       realtime_thread_pool_size_, 
       realtime_thread_priority_, 
+      realtime_main_priority_,
       realtime_thread_affinity_, 
-      true, 
-      true
+      realtime_main_affinity_,
+      require_thread_rt_priority_,
+      require_main_rt_priority_
     );
     thread_pool_ptr_ = std::make_unique<realtime_calc_thread_pool::RealtimeThreadPool<ControllerComputationResult>>(realtime_config);
   }
@@ -286,30 +296,30 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
   } while(false);
 
   // ========== Compute Function Creation ========== //
-  
+  const auto *controller_ptr_raw = this->controller_ptr_.get();
+  const auto *env_evaluator_ptr_raw = this->env_evaluator_ptr_.get();
+  const auto *mass_matrix_bridge_raw = this->mass_matrix_bridge_.get();
   auto compute_func = [q, obstacles, dim_q_ = this->dim_q_, 
-                      controller_ptr = this->controller_ptr_.get(), 
-                      env_evaluator_ptr = this->env_evaluator_ptr_.get(), 
-                      mass_matrix_bridge = this->mass_matrix_bridge_.get()](uint64_t task_id) -> ControllerComputationResult {
+                      controller_ptr = controller_ptr_raw, 
+                      env_evaluator_ptr = env_evaluator_ptr_raw, 
+                      mass_matrix_bridge = mass_matrix_bridge_raw]
+                      (uint64_t task_id) -> ControllerComputationResult {
     ControllerComputationResult result;
     result.task_id = task_id;
 
     // Get or create thread-local controller copy
     auto* controller_local = realtime_calc_thread_pool::ThreadLocalObjectManager<FLIQC_controller_core::FLIQC_controller_joint_velocity_basic>::getOrCreate(
-        "controller", *controller_ptr
-    );
+        "controller", *controller_ptr);
     
     // Get or create thread-local environment evaluator copy
     auto* env_evaluator_local = realtime_calc_thread_pool::ThreadLocalObjectManager<robot_env_evaluator::RobotEnvEvaluator>::getOrCreate(
-        "env_evaluator", *env_evaluator_ptr
-    );
+        "env_evaluator", *env_evaluator_ptr);
 
     // Get or create thread-local mass matrix bridge copy (if available)
     FrankaModelInterfaceBridge* mass_matrix_bridge_local = nullptr;
     if (mass_matrix_bridge != nullptr) {
         mass_matrix_bridge_local = realtime_calc_thread_pool::ThreadLocalObjectManager<FrankaModelInterfaceBridge>::getOrCreate(
-            "mass_matrix_bridge", *mass_matrix_bridge
-        );
+            "mass_matrix_bridge", *mass_matrix_bridge);
     }
 
     try {
@@ -454,16 +464,7 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
   
   if (enable_realtime_thread_pool_) {
     thread_pool_ptr_->submitTask(compute_func);
-    auto result_opt = thread_pool_ptr_->getLatestResult(std::chrono::microseconds(realtime_thread_pool_wait_us_));
-    
-    if (result_opt.has_value()) {
-      computation_result = result_opt.value();
-    } else {
-      error_flag_ = true;
-      ROS_ERROR_STREAM("Failed to retrieve result from thread pool, even fallback and zero fallback is skipped. "
-                       "This is a design error.");
-    }
-    
+    computation_result = thread_pool_ptr_->getLatestResult(std::chrono::microseconds(realtime_thread_pool_wait_us_));
   } else {
     computation_result = compute_func(0);
   }
@@ -727,6 +728,12 @@ void FLIQCJointVelocityNoEnvNode::update(const ros::Time& /* time */,
       }
     } while(false);
   #endif // CONTROLLER_DEBUG
+
+  // Handle errors from compute task and diagnostics
+  if (!computation_result.computation_success && !computation_result.error_message.empty()) {
+    error_flag_ = true;
+    ROS_ERROR_STREAM_ONCE(controller_name << ": compute task failed: " << computation_result.error_message);
+  }
 
   if (!error_flag_) {
     for (size_t i = 0; i < 7; ++i) {

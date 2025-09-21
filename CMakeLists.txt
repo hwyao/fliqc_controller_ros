@@ -122,6 +122,7 @@ target_compile_definitions(fliqc_controller_ros_profile PUBLIC
 ## Declare a C++ library for realtime profile controller
 add_library(fliqc_controller_ros_realtime_profile
   src/fliqc_joint_velocity_no_env_node.cpp
+  src/fliqc_joint_velocity_standard.cpp
   src/fliqc_state_source_bridge.cpp
 )
 target_compile_features(fliqc_controller_ros_realtime_profile PUBLIC 

@@ -4,4 +4,9 @@
           The joint velocity controller based on FLIQC planner and without ros node environment.
       </description>
   </class>
+  <class name="fliqc_controller_ros/FLIQCJointVelocityStandardRealtimeProfile" type="fliqc_controller_ros::FLIQCJointVelocityStandard" base_class_type="controller_interface::ControllerBase">
+      <description>
+          The joint velocity controller based on FLIQC planner and without ros node environment.
+      </description>
+  </class>
 </library>

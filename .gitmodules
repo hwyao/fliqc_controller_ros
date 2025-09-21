@@ -9,4 +9,4 @@
 [submodule "submodule/realtime_calc_thread_pool"]
 	path = submodule/realtime_calc_thread_pool
 	url = https://github.com/hwyao/realtime_calc_thread_pool
-	branch = develop
+	branch = main
