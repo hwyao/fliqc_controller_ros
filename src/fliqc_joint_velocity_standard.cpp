@@ -43,6 +43,31 @@
 #define DBGNPROF_ENABLE_PROFILE
 #endif // CONTROLLER_PROFILE
 
+// Redirect profiling macros to wrapper names to support both modes like no_env_node
+#define PROFILE_DBGNPROF_START_CLOCK
+#define PROFILE_DBGNPROF_STOP_CLOCK
+#define REALTIME_DBGNPROF_START_CLOCK
+#define REALTIME_DBGNPROF_STOP_CLOCK
+
+#ifdef CONTROLLER_PROFILE
+#define DBGNPROF_USE_ROS
+#define DBGNPROF_ENABLE_PROFILE
+#undef PROFILE_DBGNPROF_START_CLOCK
+#undef PROFILE_DBGNPROF_STOP_CLOCK
+#define PROFILE_DBGNPROF_START_CLOCK DBGNPROF_START_CLOCK
+#define PROFILE_DBGNPROF_STOP_CLOCK DBGNPROF_STOP_CLOCK
+#endif // CONTROLLER_PROFILE
+
+#ifdef CONTROLLER_REALTIME_PROFILE
+#define DBGNPROF_USE_ROS
+#define DBGNPROF_ENABLE_DEBUG
+#define DBGNPROF_ENABLE_PROFILE
+#undef REALTIME_DBGNPROF_START_CLOCK
+#undef REALTIME_DBGNPROF_STOP_CLOCK
+#define REALTIME_DBGNPROF_START_CLOCK DBGNPROF_START_CLOCK
+#define REALTIME_DBGNPROF_STOP_CLOCK DBGNPROF_STOP_CLOCK
+#endif // CONTROLLER_REALTIME_PROFILE
+
 #include <debug_and_profile_helper/helper_macros.hpp>
 
 namespace fliqc_controller_ros {
@@ -128,6 +153,26 @@ bool FLIQCJointVelocityStandard::init(hardware_interface::RobotHW* robot_hardwar
   READ_PARAM(node_handle, controller_name,
       "/fliqc_controller_ros/velocity_input_threshold", velocity_input_threshold_);
 
+  // Get controller parameters: realtime thread pool (optional)
+  READ_PARAM(node_handle, controller_name,
+    "/fliqc_controller_ros/enable_realtime_thread_pool", enable_realtime_thread_pool_);
+  READ_PARAM(node_handle, controller_name,
+    "/fliqc_controller_ros/realtime_thread_pool_config/max_threads", realtime_thread_pool_size_);
+  READ_PARAM(node_handle, controller_name,
+    "/fliqc_controller_ros/realtime_thread_pool_config/thread_rt_priority", realtime_thread_priority_);
+  READ_PARAM(node_handle, controller_name,
+    "/fliqc_controller_ros/realtime_thread_pool_config/main_rt_priority", realtime_main_priority_);
+  READ_PARAM_VECTOR(node_handle, controller_name,
+    "/fliqc_controller_ros/realtime_thread_pool_config/thread_affinity", realtime_thread_affinity_);
+  READ_PARAM(node_handle, controller_name,
+      "/fliqc_controller_ros/realtime_thread_pool_config/main_affinity", realtime_main_affinity_);
+  READ_PARAM(node_handle, controller_name,
+      "/fliqc_controller_ros/realtime_thread_pool_config/require_thread_rt_priority", require_thread_rt_priority_);
+  READ_PARAM(node_handle, controller_name,
+      "/fliqc_controller_ros/realtime_thread_pool_config/require_main_rt_priority", require_main_rt_priority_);
+  READ_PARAM(node_handle, controller_name,
+    "/fliqc_controller_ros/realtime_thread_pool_wait_us", realtime_thread_pool_wait_us_);
+
   // Get controller parameters: fliqc_controller_joint_velocity_standard parameters
   READ_PARAM(node_handle, controller_name,
       "/fliqc_controller_joint_velocity_standard/switch_to_disable_multi_agent", switch_to_disable_multi_agent_);
@@ -152,6 +197,10 @@ bool FLIQCJointVelocityStandard::init(hardware_interface::RobotHW* robot_hardwar
     "/robot_env_evaluator/projector_dist_to_control_with_zero_orientation", env_evaluator_ptr_->projector_dist_to_control_with_zero_orientation_);
   READ_PARAM(node_handle, controller_name,
     "/robot_env_evaluator/robust_pinv_lambda", env_evaluator_ptr_->robust_pinv_lambda_);
+  READ_PARAM(node_handle, controller_name,
+    "/robot_env_evaluator/enable_broad_phase_search", env_evaluator_ptr_->broad_phase_search_enable_);
+  READ_PARAM(node_handle, controller_name,
+    "/robot_env_evaluator/broad_phase_collision_padding", env_evaluator_ptr_->broad_phase_collision_padding_);
   if (preset->isFrankaRobot()){
     franka_hw::FrankaModelInterface* model_interface_ = robot_hardware->get<franka_hw::FrankaModelInterface>();
     CHECK_NOT_NULLPTR(controller_name, model_interface_);
@@ -212,6 +261,25 @@ bool FLIQCJointVelocityStandard::init(hardware_interface::RobotHW* robot_hardwar
   ROS_INFO_STREAM(controller_name << ": Diagnostic period: " << period);
 
   ROS_INFO_STREAM(controller_name << ": Controller started.");
+
+  // Initialize realtime compute thread pool if enabled
+  if (enable_realtime_thread_pool_) {
+    try {
+      realtime_calc_thread_pool::Config realtime_config(
+        realtime_thread_pool_size_,
+        realtime_thread_priority_,
+        realtime_main_priority_,
+        realtime_thread_affinity_,
+        realtime_main_affinity_,
+        require_thread_rt_priority_,
+        require_main_rt_priority_
+      );
+      thread_pool_ptr_ = std::make_unique<realtime_calc_thread_pool::RealtimeThreadPool<StandardControllerComputationResult>>(realtime_config);
+    } catch (const std::exception& e) {
+      ROS_ERROR_STREAM(controller_name << ": Failed to create realtime thread pool: " << e.what());
+      enable_realtime_thread_pool_ = false;  // fallback to single-threaded
+    }
+  }
   return true;
 }
 
@@ -284,155 +352,180 @@ void FLIQCJointVelocityStandard::checkControllerState(diagnostic_updater::Diagno
 void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
                                             const ros::Duration& period) {
   elapsed_time_ += period;
+  static int submit_counter = 0;
+  bool submit_success = true;
 
-  // collect the obstacle information. In this file, we make up our own obstacle information
+  REALTIME_DBGNPROF_START_CLOCK;
+  // Snapshot robot state and inputs
   Eigen::VectorXd q = Eigen::VectorXd::Zero(dim_q_);
   Eigen::VectorXd q_dot = Eigen::VectorXd::Zero(dim_q_);
-  std::vector<robot_env_evaluator::distanceResult> distances;
   for (size_t i = 0; i < dim_q_; ++i) {
     q(i) = velocity_joint_handles_[i].getPosition();
     q_dot(i) = velocity_joint_handles_[i].getVelocity();
   }
-  
-  DBGNPROF_START_CLOCK; 
+  std::vector<robot_env_evaluator::obstacleInput> obstacles_local;
   {
     std::lock_guard<std::mutex> lock(obstacles_mutex_);
-    env_evaluator_ptr_->computeDistances(q, obstacles_, distances);
+    obstacles_local = obstacles_;
   }
-  DBGNPROF_STOP_CLOCK("computeDistances");
+  Eigen::Vector3d goal_position_local = goal_position_;
+  Eigen::Vector3d targeted_velocity_local = targeted_velocity_;
 
-  // //distances
-  // for (size_t i = 0; i < distances.size(); i++) {
-  //   ROS_INFO_STREAM("[STEP1]FLIQCJointVelocityStandard: Distance " << i << " is "
-  //       << distances[i].distance << "\n"
-  //       << "Contacted Robot Link: " << distances[i].contacted_robot_link << "\n"
-  //       << "Projector Jointspace to Distance: " << distances[i].projector_jointspace_to_dist.transpose() << "\n"
-  //       << "Projector Distance to Jointspace: " << distances[i].projector_dist_to_jointspace.transpose() << "\n");
-  // }
-
-  DBGNPROF_START_CLOCK;
-  // Get the kinematics information
-  Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
-  Eigen::MatrixXd J = Eigen::MatrixXd::Zero(6, dim_q_);
-  env_evaluator_ptr_ -> forwardKinematics(q, T);
-  env_evaluator_ptr_ -> jacobian(q, J);
-
-  // Calculate the targeted velocity goal
-  Eigen::VectorXd q_dot_guide = Eigen::VectorXd::Zero(dim_q_);
-  Eigen::Vector3d now_ = T.block<3, 1>(0, 3);
-  // If you are asking why redundant assign targeted_velocity, instead of initializing goal_diff with targeted_velocity_ directly,
-  // I can only answer its an optimization magic. You can also try to print goal_diff out and problem also will go away.
-  // if you don't have either of them, just wait to be r🦍d by the compiler :P
-  Eigen::Vector3d targeted_velocity = targeted_velocity_;         
-  Eigen::Vector3d goal_diff = goal_position_ - now_; 
-  Eigen::Vector3d goal_diff_regularized = Eigen::Vector3d::Zero();
-  if (goal_diff.norm() >= switch_to_disable_multi_agent_){
-    goal_diff_regularized = targeted_velocity;  // = targeted_velocity_;
-  } else{
-    goal_diff_regularized = goal_diff;
-  }
-  if (goal_diff_regularized.norm() > velocity_input_threshold_){
-    goal_diff_regularized = goal_diff_regularized.normalized() * velocity_input_threshold_;
-  }
-  Eigen::MatrixXd Jpos = J.block<3, 7>(0, 0);
-  Eigen::MatrixXd JJt = Jpos * Jpos.transpose();
-  Eigen::MatrixXd damped_identity = robust_pinv_lambda_ * robust_pinv_lambda_ * Eigen::MatrixXd::Identity(JJt.rows(), JJt.cols());
-  q_dot_guide = Jpos.transpose() * (JJt + damped_identity).ldlt().solve(goal_diff_regularized);
-  DBGNPROF_STOP_CLOCK("kinematics");
-  //ROS_INFO_STREAM_THROTTLE(1, controller_name << ": goal_diff is " << goal_diff.transpose()); // wanna try it huh？ :D
-
-  DBGNPROF_START_CLOCK;
-  // Calculate the controller cost input
-  FLIQC_controller_core::FLIQC_state_input state_input;
-  state_input.q_dot_guide = q_dot_guide;
-  if (controller_ptr_->quad_cost_type == FLIQC_controller_core::FLIQC_quad_cost_type::FLIQC_QUAD_COST_MASS_MATRIX ||
-      controller_ptr_->quad_cost_type == FLIQC_controller_core::FLIQC_quad_cost_type::FLIQC_QUAD_COST_MASS_MATRIX_VELOCITY_ERROR){
-    mass_matrix_bridge_->getMassMatrix(q, state_input.M);
-  }
-  state_input.J = J;  
-
-  // Get the obstacle distance information and convert it as the distance input for the controller
-  std::vector<FLIQC_controller_core::FLIQC_distance_input> distance_inputs;
-  for (size_t i = 0; i < distances.size(); ++i){
-    FLIQC_controller_core::FLIQC_distance_input distance_input;
-    distance_input.id = i;
-    distance_input.distance = distances[i].distance;
-    distance_input.projector_control_to_dist = distances[i].projector_jointspace_to_dist.transpose();
-    distance_input.projector_dist_to_control = distances[i].projector_dist_to_jointspace;
-    distance_inputs.push_back(distance_input);
-  }
-  DBGNPROF_STOP_CLOCK("organizeData");
-
-  // //debug: distance_inputs
-  // for (size_t i = 0; i < distance_inputs.size(); ++i){
-  //   ROS_INFO_STREAM("[STEP2]FLIQCJointVelocityStandard: Distance " << i << " is " 
-  //       << distance_inputs[i].distance << " with projector " << std::endl << distance_inputs[i].projector_control_to_dist << std::endl
-  //       << "and reverse projector " << std::endl << distance_inputs[i].projector_dist_to_control.transpose());
-  // }
-
-  // //debug: distance_inputs activated
-  // for (size_t i = 0; i < distance_inputs.size(); ++i){
-  //   if (distance_inputs[i].distance < controller_ptr_->active_threshold){
-  //     ROS_INFO_STREAM("[STEP2_COND]FLIQCJointVelocityStandard: Distance " << i << " is " 
-  //         << distance_inputs[i].distance << " with projector " << std::endl << distance_inputs[i].projector_control_to_dist);
-  //   }
-  // }
-
-  Eigen::VectorXd q_dot_command;
-  FLIQC_controller_core::FLIQC_control_output control_output;
-  control_output.x = Eigen::VectorXd::Zero(0);
-  control_output.y = Eigen::VectorXd::Zero(0);
-
-  // run the controller
-  if (!error_flag_){
+  // Build compute function
+  const auto *controller_ptr_raw = this->controller_ptr_.get();
+  const auto *env_evaluator_ptr_raw = this->env_evaluator_ptr_.get();
+  const auto *mass_matrix_bridge_raw = this->mass_matrix_bridge_.get();
+  auto compute_func = [q, obstacles_local, goal_position_local, targeted_velocity_local,
+                       dim_q_ = this->dim_q_,
+                       controller_ptr = controller_ptr_raw,
+                       env_evaluator_ptr = env_evaluator_ptr_raw,
+                       mass_matrix_bridge = mass_matrix_bridge_raw,
+                       robust_pinv_lambda = this->robust_pinv_lambda_,
+                       velocity_input_threshold = this->velocity_input_threshold_,
+                       switch_to_disable_multi_agent = this->switch_to_disable_multi_agent_]
+                      (uint64_t task_id) -> StandardControllerComputationResult {
+    StandardControllerComputationResult result;
+    result.task_id = task_id;
     try {
-      DBGNPROF_START_CLOCK;
-      q_dot_command = controller_ptr_->runController(state_input, distance_inputs, control_output);
-      DBGNPROF_STOP_CLOCK("runController");
+      // Thread-local copies of heavy components
+      auto* controller_local = realtime_calc_thread_pool::ThreadLocalObjectManager<FLIQC_controller_core::FLIQC_controller_joint_velocity_basic>::getOrCreate(
+          "controller", *controller_ptr);
+      auto* env_local = realtime_calc_thread_pool::ThreadLocalObjectManager<robot_env_evaluator::RobotEnvEvaluator>::getOrCreate(
+          "env_evaluator", *env_evaluator_ptr);
+      auto* mass_matrix_bridge_local = realtime_calc_thread_pool::ThreadLocalObjectManager<fliqc_controller_ros::FrankaModelInterfaceBridge>::getOrCreate(
+          "mass_matrix_bridge", *mass_matrix_bridge);
+
+      // Distances
+      std::vector<robot_env_evaluator::distanceResult> distances;
+      PROFILE_DBGNPROF_START_CLOCK;
+      env_local->computeDistances(q, obstacles_local, distances);
+      PROFILE_DBGNPROF_STOP_CLOCK("computeDistances");
+
+      // Kinematics
+      PROFILE_DBGNPROF_START_CLOCK;
+      Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
+      Eigen::MatrixXd J = Eigen::MatrixXd::Zero(6, dim_q_);
+      env_local->forwardKinematics(q, T);
+      env_local->jacobian(q, J);
+
+      // Guidance and goal diff
+      Eigen::Vector3d now_pos = T.block<3,1>(0,3);
+      Eigen::Vector3d goal_diff = goal_position_local - now_pos;
+      Eigen::Vector3d goal_diff_regularized = Eigen::Vector3d::Zero();
+      Eigen::Vector3d targeted_velocity = targeted_velocity_local; // keep a copy
+      if (goal_diff.norm() >= switch_to_disable_multi_agent){
+        goal_diff_regularized = targeted_velocity;
+      } else {
+        goal_diff_regularized = goal_diff;
+      }
+      if (goal_diff_regularized.norm() > velocity_input_threshold){
+        goal_diff_regularized = goal_diff_regularized.normalized() * velocity_input_threshold;
+      }
+      Eigen::MatrixXd Jpos = J.block(0, 0, 3, dim_q_);
+      Eigen::MatrixXd JJt = Jpos * Jpos.transpose();
+      Eigen::MatrixXd damped_identity = robust_pinv_lambda * robust_pinv_lambda * Eigen::MatrixXd::Identity(JJt.rows(), JJt.cols());
+      Eigen::VectorXd q_dot_guide = Jpos.transpose() * (JJt + damped_identity).ldlt().solve(goal_diff_regularized);
+      PROFILE_DBGNPROF_STOP_CLOCK("kinematics");
+
+      // Organize state input
+      PROFILE_DBGNPROF_START_CLOCK;
+      FLIQC_controller_core::FLIQC_state_input state_input;
+      state_input.q_dot_guide = q_dot_guide;
+      if (controller_local->quad_cost_type == FLIQC_controller_core::FLIQC_quad_cost_type::FLIQC_QUAD_COST_MASS_MATRIX ||
+          controller_local->quad_cost_type == FLIQC_controller_core::FLIQC_quad_cost_type::FLIQC_QUAD_COST_MASS_MATRIX_VELOCITY_ERROR){
+        if (mass_matrix_bridge_local) {
+          mass_matrix_bridge_local->getMassMatrix(q, state_input.M);
+        } else {
+          state_input.M = Eigen::MatrixXd::Identity(dim_q_, dim_q_);
+        }
+      }
+      state_input.J = J;
+
+      // Distances to controller inputs
+      std::vector<FLIQC_controller_core::FLIQC_distance_input> distance_inputs;
+      distance_inputs.reserve(distances.size());
+      for (size_t i = 0; i < distances.size(); ++i){
+        FLIQC_controller_core::FLIQC_distance_input di;
+        di.id = i;
+        di.distance = distances[i].distance;
+        di.projector_control_to_dist = distances[i].projector_jointspace_to_dist.transpose();
+        di.projector_dist_to_control = distances[i].projector_dist_to_jointspace;
+        distance_inputs.push_back(std::move(di));
+      }
+      PROFILE_DBGNPROF_STOP_CLOCK("organizeData");
+
+      // Run controller
+      FLIQC_controller_core::FLIQC_control_output control_output;
+      control_output.x = Eigen::VectorXd::Zero(0);
+      control_output.y = Eigen::VectorXd::Zero(0);
+      PROFILE_DBGNPROF_START_CLOCK;
+      Eigen::VectorXd q_dot_command = controller_local->runController(state_input, distance_inputs, control_output);
+      PROFILE_DBGNPROF_STOP_CLOCK("runController");
+
+      // Fill result
+      result.q_dot_command = q_dot_command;
+      result.goal_diff = goal_diff;
+      result.computation_success = true;
+
+      #if defined(CONTROLLER_DEBUG) || defined(CONTROLLER_PROFILE)
+      result.distances = std::move(distances);
+      result.T = T;
+      result.J = J;
+      result.q_dot_guide = q_dot_guide;
+      result.goal_position = goal_position_local;
+      result.current_position = now_pos;
+      result.Jpos = Jpos;
+      #endif
 
     } catch (const FLIQC_controller_core::LCQPowException& e) {
-      DBGNPROF_STOP_CLOCK("runController");
-      error_flag_ = true;
-      diag_updater_->force_update();
-      ROS_ERROR_STREAM_ONCE(controller_name << ": LCQPowException caught during runController:\n" << e.what());
-  
-      try {
-        // Get the root path of the package using rospack
-        std::string package_path = ros::package::getPath("fliqc_controller_ros");
-        if (package_path.empty()) {
-          ROS_ERROR_STREAM("Failed to find package path for fliqc_controller_ros.");
-          throw std::runtime_error("Package path not found.");
-        }
-  
-        // Create the log directory if it doesn't exist
-        std::string log_dir = package_path + "/log";
-        std::filesystem::create_directories(log_dir);
-  
-        // Create a subdirectory with the current time
-        auto now = std::chrono::system_clock::now();
-        auto time_t_now = std::chrono::system_clock::to_time_t(now);
-        std::ostringstream time_stream;
-        time_stream << std::put_time(std::localtime(&time_t_now), "%Y-%m-%d_%H-%M-%S-%Z");
-        std::string base_dir = log_dir + "/" + time_stream.str() + "_" + controller_name;
-        std::filesystem::create_directories(base_dir);
-        ROS_INFO_STREAM("Log is saved in directory: " << base_dir);
-  
-        // Create subdirectories for different types of logs
-        FLIQC_controller_core::logLCQPowExceptionAsFile(e, base_dir);
-  
-      } catch (const std::exception& ex) {
-        ROS_ERROR_STREAM("Failed to save exception to log: " << ex.what());
-      }
+      result.computation_success = false;
+      result.error_message = std::string("LCQPowException: ") + e.what();
     } catch (const std::exception& e) {
-      error_flag_ = true;
-      diag_updater_->force_update();
-      ROS_ERROR_STREAM(controller_name << ": std::exception caught during runController:\n" << e.what());
+      result.computation_success = false;
+      result.error_message = e.what();
     } catch (...) {
-      error_flag_ = true;
-      diag_updater_->force_update();
-      ROS_ERROR_STREAM(controller_name << ": Unknown exception caught during runController.");
+      result.computation_success = false;
+      result.error_message = "Unknown exception in compute task";
     }
+    return result;
+  };
+
+  // Execute compute
+  StandardControllerComputationResult computation_result;
+  if (enable_realtime_thread_pool_) {
+    submit_success = thread_pool_ptr_->submitTask(compute_func);
+    computation_result = thread_pool_ptr_->getLatestResult(std::chrono::microseconds(realtime_thread_pool_wait_us_));
+    if (submit_success) {
+      submit_counter++;
+    }
+  } else {
+    computation_result = compute_func(++submit_counter);
   }
+  REALTIME_DBGNPROF_STOP_CLOCK("totalComputation");
+
+  #if defined(CONTROLLER_REALTIME_PROFILE)
+  static int pool_delay = 0;
+  if (submit_success){
+    pool_delay = submit_counter - computation_result.task_id;
+  } else {
+    pool_delay++;
+  }
+  DBGNPROF_LOG("submit_success", submit_success);
+  DBGNPROF_LOG("pool_delay", pool_delay);
+  #endif
+
+  // Extract q_dot_command and other fields using original variable names for debug blocks
+  Eigen::VectorXd q_dot_command = computation_result.q_dot_command;
+  Eigen::Vector3d goal_diff = computation_result.goal_diff;
+  #if defined(CONTROLLER_DEBUG) || defined(CONTROLLER_PROFILE)
+  // Export variables matching original debug code
+  std::vector<robot_env_evaluator::distanceResult> distances = computation_result.distances;
+  Eigen::Matrix4d T = computation_result.T;
+  Eigen::MatrixXd J = computation_result.J;
+  Eigen::VectorXd q_dot_guide = computation_result.q_dot_guide;
+  Eigen::Vector3d now_ = computation_result.current_position;
+  Eigen::MatrixXd Jpos = computation_result.Jpos;
+  #endif
 
   // publish and visualize the controller start and goal information
   #ifdef CONTROLLER_DEBUG
@@ -521,6 +614,11 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
         }
         visualization_msgs::MarkerArray obs_marker_array;
         geometry_msgs::Point point_helper;
+        
+        // Track previous number of markers to handle shrinking arrays
+        static size_t prev_markers_used = 0;
+        size_t current_markers = distances.size();
+        
         for (size_t i = 0; i < distances.size(); ++i){
           // nearest point on object
           visualization_msgs::Marker nearest_point_marker;
@@ -621,6 +719,35 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
           }
           obs_marker_array.markers.push_back(normal_vector_marker);
         }
+        
+        // If current number of markers is less than previous, delete the excess markers
+        if (current_markers < prev_markers_used) {
+          for (size_t i = current_markers; i < prev_markers_used; ++i) {
+            // Delete markers for each namespace
+            visualization_msgs::Marker delete_marker;
+            delete_marker.header.frame_id = "panda_link0";
+            delete_marker.header.stamp = ros::Time::now();
+            delete_marker.action = visualization_msgs::Marker::DELETE;
+            delete_marker.id = i;
+            
+            // Delete from each namespace
+            delete_marker.ns = "env_info_obs";
+            obs_marker_array.markers.push_back(delete_marker);
+            
+            delete_marker.ns = "env_info_rbt";
+            obs_marker_array.markers.push_back(delete_marker);
+            
+            delete_marker.ns = "env_info_connection";
+            obs_marker_array.markers.push_back(delete_marker);
+            
+            delete_marker.ns = "env_info_normal";
+            obs_marker_array.markers.push_back(delete_marker);
+          }
+        }
+        
+        // Update previous markers count
+        prev_markers_used = current_markers;
+        
         obs_pub.publish(obs_marker_array);
       }
     } while(false);
@@ -630,25 +757,20 @@ void FLIQCJointVelocityStandard::update(const ros::Time& /* time */,
   DBGNPROF_LOG("q_dot_real", q_dot);
   DBGNPROF_LOG("q_dot_guide", q_dot_guide);
   DBGNPROF_LOG("q_dot_command", q_dot_command);
-
   Eigen::VectorXd distances_vec = Eigen::VectorXd::Zero(distances.size());
   for (size_t i = 0; i < distances.size(); ++i){
     distances_vec(i) = distances[i].distance;
   }
   DBGNPROF_LOG("distances", distances_vec);
 
-  Eigen::VectorXd lambda_vec = Eigen::VectorXd::Zero(distances.size());
-  if (control_output.x.size() > dim_q_){
-    int lambda_count = 0;
-    for (size_t i = 0; i < distances.size(); ++i){
-      if (distances[i].distance <= controller_ptr_->active_threshold){
-        lambda_vec(i) = control_output.x(dim_q_ + lambda_count);
-        lambda_count++;
-      }
-    }
-  }
-  DBGNPROF_LOG("lambda", lambda_vec);
+  // Note: lambda logging removed in pooled version to keep compute self-contained
   #endif // CONTROLLER_DEBUG
+
+  // Handle errors from compute task and diagnostics
+  if (!computation_result.computation_success && !computation_result.error_message.empty()) {
+    error_flag_ = true;
+    ROS_ERROR_STREAM_ONCE(controller_name << ": compute task failed: " << computation_result.error_message);
+  }
 
   position_error_norm_ = goal_diff.norm();
   velocity_norm_ = q_dot.norm();

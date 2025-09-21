@@ -27,6 +27,7 @@ find_package(catkin REQUIRED COMPONENTS
 # find_package(Boost REQUIRED COMPONENTS system)
 add_subdirectory(submodule/FLIQC_controller_core)
 add_subdirectory(submodule/robot_env_evaluator)
+add_subdirectory(submodule/realtime_calc_thread_pool)
 
 ###################################
 ## catkin specific configuration ##
@@ -74,6 +75,7 @@ target_link_libraries(fliqc_controller_ros PUBLIC
   ${catkin_LIBRARIES}
   FLIQC_controller_core
   robot_env_evaluator
+  realtime_calc_thread_pool
 )
 
 ## Declare a C++ library for debug controller
@@ -91,6 +93,7 @@ target_link_libraries(fliqc_controller_ros_debug PUBLIC
   ${catkin_LIBRARIES}
   FLIQC_controller_core
   robot_env_evaluator
+  realtime_calc_thread_pool
 )
 target_compile_definitions(fliqc_controller_ros_debug PUBLIC 
   CONTROLLER_DEBUG
@@ -110,9 +113,29 @@ target_link_libraries(fliqc_controller_ros_profile PUBLIC
   ${catkin_LIBRARIES}
   FLIQC_controller_core
   robot_env_evaluator
+  realtime_calc_thread_pool
 )
 target_compile_definitions(fliqc_controller_ros_profile PUBLIC 
   CONTROLLER_PROFILE
+)
+
+## Declare a C++ library for realtime profile controller
+add_library(fliqc_controller_ros_realtime_profile
+  src/fliqc_joint_velocity_no_env_node.cpp
+  src/fliqc_joint_velocity_standard.cpp
+  src/fliqc_state_source_bridge.cpp
+)
+target_compile_features(fliqc_controller_ros_realtime_profile PUBLIC 
+    cxx_std_17
+)
+target_link_libraries(fliqc_controller_ros_realtime_profile PUBLIC
+  ${catkin_LIBRARIES}
+  FLIQC_controller_core
+  robot_env_evaluator
+  realtime_calc_thread_pool
+)
+target_compile_definitions(fliqc_controller_ros_realtime_profile PUBLIC 
+  CONTROLLER_REALTIME_PROFILE
 )
 
 ## Declare a C++ executable for the utils

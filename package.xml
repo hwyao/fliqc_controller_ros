@@ -73,5 +73,6 @@
     <controller_interface plugin="${prefix}/fliqc_controller_ros_plugin.xml" />
     <controller_interface plugin="${prefix}/fliqc_controller_ros_plugin_debug.xml" />
     <controller_interface plugin="${prefix}/fliqc_controller_ros_plugin_profile.xml" />
+    <controller_interface plugin="${prefix}/fliqc_controller_ros_plugin_realtime_profile.xml" />
   </export>
 </package>

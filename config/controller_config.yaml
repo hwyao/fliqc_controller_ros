@@ -28,9 +28,9 @@ fliqc_controller_core:
     enable_nullspace_projector_in_A: true
     dt: 0.06
     eps: 0.02
-    active_threshold: 0.04
+    active_threshold: 0.04                 # active_threshold larger than eps, otherwise infeasible
     q_dot_max: [2.1750, 2.1750, 2.1750, 2.1750, 2.6100, 2.6100, 2.6100]   # [rad/s]
-    weight_on_mass_matrix: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+    weight_on_mass_matrix: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]   # experimential, do not suggest to change
 
 fliqc_controller_ros:
     position_convergence_threshold: 0.005
@@ -38,6 +38,17 @@ fliqc_controller_ros:
     diagnostic_period: 0.05
     robust_pinv_lambda: 0.004
     velocity_input_threshold: 0.05
+    record_fliqc_throw_as_text: false      # suggested to be false when thread pool is enabled, otherwise will be flooded.
+    enable_realtime_thread_pool: true
+    realtime_thread_pool_config:
+        max_threads: 2
+        thread_rt_priority: 1
+        main_rt_priority: 99
+        thread_affinity: [8, 10]
+        main_affinity: 0
+        require_thread_rt_priority: true
+        require_main_rt_priority: true
+    realtime_thread_pool_wait_us: 300
 
 fliqc_controller_joint_velocity_standard:
     switch_to_disable_multi_agent: 0.05
@@ -57,6 +68,8 @@ robot_env_evaluator:
     projector_dist_to_control_enable: true
     projector_dist_to_control_with_zero_orientation: false
     robust_pinv_lambda: 0.001
+    enable_broad_phase_search: true
+    broad_phase_collision_padding: 0.055            # broad_phase_collision_padding larger than active_threshold, otherwise incontinous
 
 fliqc_joint_velocity_no_env_node:
     type: fliqc_controller_ros/FLIQCJointVelocityNoEnvNode
@@ -97,6 +110,19 @@ fliqc_joint_velocity_no_env_node_profile:
         - $(arg arm_id)_joint6
         - $(arg arm_id)_joint7
 
+fliqc_joint_velocity_no_env_node_realtime_profile:
+    type: fliqc_controller_ros/FLIQCJointVelocityNoEnvNodeRealtimeProfile
+    arm_id: $(arg arm_id)
+    robot_preset: panda
+    joint_names:
+        - $(arg arm_id)_joint1
+        - $(arg arm_id)_joint2
+        - $(arg arm_id)_joint3
+        - $(arg arm_id)_joint4
+        - $(arg arm_id)_joint5
+        - $(arg arm_id)_joint6
+        - $(arg arm_id)_joint7
+
 fliqc_joint_velocity_standard:
     type: fliqc_controller_ros/FLIQCJointVelocityStandard
     arm_id: $(arg arm_id)
@@ -125,6 +151,19 @@ fliqc_joint_velocity_standard_debug:
 
 fliqc_joint_velocity_standard_profile:
     type: fliqc_controller_ros/FLIQCJointVelocityStandardProfile
+    arm_id: $(arg arm_id)
+    robot_preset: panda
+    joint_names:
+        - $(arg arm_id)_joint1
+        - $(arg arm_id)_joint2
+        - $(arg arm_id)_joint3
+        - $(arg arm_id)_joint4
+        - $(arg arm_id)_joint5
+        - $(arg arm_id)_joint6
+        - $(arg arm_id)_joint7
+
+fliqc_joint_velocity_standard_realtime_profile:
+    type: fliqc_controller_ros/FLIQCJointVelocityStandardRealtimeProfile
     arm_id: $(arg arm_id)
     robot_preset: panda
     joint_names:
