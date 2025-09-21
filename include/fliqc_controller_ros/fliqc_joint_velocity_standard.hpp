@@ -21,6 +21,7 @@
 
 #include <FLIQC_controller_core/FLIQC_controllers.hpp>
 #include <robot_env_evaluator/robot_env_evaluator.hpp>
+#include <realtime_calc_thread_pool/thread_pool.hpp>
 #include "fliqc_controller_ros/fliqc_state_source_bridge.hpp"
 
 #include <std_msgs/Float64.h>
@@ -29,6 +30,39 @@
 #include <moveit_msgs/PlanningScene.h>
 
 namespace fliqc_controller_ros {
+
+/**
+ * @brief Result structure for controller computation tasks (for realtime pool)
+ */
+struct StandardControllerComputationResult {
+  // Primary result
+  Eigen::Matrix<double, 7, 1> q_dot_command;   // size = dim_q at runtime
+  Eigen::Vector3d goal_diff = Eigen::Vector3d::Zero();
+
+  // Debugging information
+  #if defined(CONTROLLER_DEBUG) || defined(CONTROLLER_PROFILE)
+  std::vector<robot_env_evaluator::distanceResult> distances;
+  Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
+  Eigen::MatrixXd J;        // 6 x dim_q
+  Eigen::VectorXd q_dot_guide; // dim_q
+  Eigen::Vector3d goal_position = Eigen::Vector3d::Zero();
+  Eigen::Vector3d current_position = Eigen::Vector3d::Zero();
+  Eigen::MatrixXd Jpos;     // 3 x dim_q
+  #endif
+
+  // Status information
+  bool computation_success = false;
+  std::string error_message;
+  uint64_t task_id = 0;
+
+  // Default constructor
+  StandardControllerComputationResult() : computation_success(false) {}
+
+  void setZero(std::size_t dim_q = 0) {
+    q_dot_command = Eigen::VectorXd::Zero(dim_q);
+    computation_success = false;
+  }
+};
 
 class FLIQCJointVelocityStandard : public controller_interface::MultiInterfaceController
                                                 <hardware_interface::VelocityJointInterface,
@@ -51,9 +85,12 @@ class FLIQCJointVelocityStandard : public controller_interface::MultiInterfaceCo
   std::vector<hardware_interface::JointHandle> velocity_joint_handles_;
   ros::Duration elapsed_time_;
 
+  // Realtime compute thread pool
+  std::unique_ptr<realtime_calc_thread_pool::RealtimeThreadPool<StandardControllerComputationResult>> thread_pool_ptr_;
+
   std::unique_ptr<FLIQC_controller_core::FLIQC_controller_joint_velocity_basic> controller_ptr_;
   std::unique_ptr<robot_env_evaluator::RobotEnvEvaluator> env_evaluator_ptr_;
-  std::unique_ptr<robot_env_evaluator::KinematicDataBridge> mass_matrix_bridge_;
+  std::unique_ptr<fliqc_controller_ros::FrankaModelInterfaceBridge> mass_matrix_bridge_;
   std::unique_ptr<diagnostic_updater::Updater> diag_updater_;
 
   int dim_q_;                          ///< The dimension of the joint q 
@@ -84,6 +121,17 @@ class FLIQCJointVelocityStandard : public controller_interface::MultiInterfaceCo
   double robust_pinv_lambda_ = 0.001;
   double velocity_input_threshold_ = 0.05;
   double switch_to_disable_multi_agent_  = 0.025;
+
+  // realtime thread pool parameters
+  bool enable_realtime_thread_pool_ = true;
+  int realtime_thread_pool_size_ = 4;
+  int realtime_thread_priority_ = 1;
+  int realtime_main_priority_ = 98;
+  std::vector<int> realtime_thread_affinity_ = {};
+  int realtime_main_affinity_ = 0;
+  bool require_thread_rt_priority_ = false;
+  bool require_main_rt_priority_ = true;
+  int realtime_thread_pool_wait_us_ = 300;
 };
 
 }  // namespace fliqc_controller_ros

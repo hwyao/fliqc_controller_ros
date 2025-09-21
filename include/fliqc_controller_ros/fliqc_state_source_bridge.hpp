@@ -21,9 +21,18 @@ namespace fliqc_controller_ros
         /**
          * @brief Construct a new FrankaModelInterfaceBridge object
          * 
-         * @param model_handle The Franka model handle
+         * @param model_interface The Franka model interface
+         * @param arm_id The arm identifier
          */
         FrankaModelInterfaceBridge(franka_hw::FrankaModelInterface* model_interface, const std::string& arm_id);
+
+        /**
+         * @brief Copy constructor for FrankaModelInterfaceBridge object
+         * 
+         * @param other The FrankaModelInterfaceBridge object to copy from
+         * @note Creates a new handle to the same model interface and arm_id
+         */
+        FrankaModelInterfaceBridge(const FrankaModelInterfaceBridge& other);
 
         /**
          * @brief Destroy the FrankaModelInterfaceBridge object
@@ -40,6 +49,8 @@ namespace fliqc_controller_ros
     
     protected:
         std::unique_ptr<franka_hw::FrankaModelHandle> model_handle_;
+        franka_hw::FrankaModelInterface* model_interface_;  ///< Pointer to the model interface (not owned)
+        std::string arm_id_;                                ///< The arm identifier
     };
 }
 

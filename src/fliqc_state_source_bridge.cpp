@@ -7,14 +7,25 @@
  * Use of this source code is governed by the MIT license, see LICENSE.
  */
 #include "fliqc_controller_ros/fliqc_state_source_bridge.hpp"
+#include <hardware_interface/hardware_interface.h>
 
 namespace fliqc_controller_ros
 {
-    FrankaModelInterfaceBridge::FrankaModelInterfaceBridge(franka_hw::FrankaModelInterface* model_interface, const std::string& arm_id) {
+    FrankaModelInterfaceBridge::FrankaModelInterfaceBridge(franka_hw::FrankaModelInterface* model_interface, const std::string& arm_id) 
+        : model_interface_(model_interface), arm_id_(arm_id) {
         try {
-            model_handle_ = std::make_unique<franka_hw::FrankaModelHandle>(model_interface->getHandle(arm_id + "_model"));
+            model_handle_ = std::make_unique<franka_hw::FrankaModelHandle>(model_interface_->getHandle(arm_id_ + "_model"));
         } catch (const hardware_interface::HardwareInterfaceException& ex) { // Ensure exception type is correct
             throw std::runtime_error("FrankaModelInterfaceBridge: Exception getting model handle from interface: " + std::string(ex.what()));
+        }
+    }
+
+    FrankaModelInterfaceBridge::FrankaModelInterfaceBridge(const FrankaModelInterfaceBridge& other)
+        : model_interface_(other.model_interface_), arm_id_(other.arm_id_) {
+        try {
+            model_handle_ = std::make_unique<franka_hw::FrankaModelHandle>(model_interface_->getHandle(arm_id_ + "_model"));
+        } catch (const hardware_interface::HardwareInterfaceException& ex) {
+            throw std::runtime_error("FrankaModelInterfaceBridge: Exception getting model handle from interface during copy: " + std::string(ex.what()));
         }
     }
 
