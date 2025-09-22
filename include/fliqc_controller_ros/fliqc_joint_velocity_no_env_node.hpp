@@ -22,8 +22,6 @@
 #include <realtime_calc_thread_pool/thread_pool.hpp>
 #include "fliqc_controller_ros/fliqc_state_source_bridge.hpp"
 
-#define CONTROLLER_DEBUG
-
 namespace fliqc_controller_ros {
 
 /**
